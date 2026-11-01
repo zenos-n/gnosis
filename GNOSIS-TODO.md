@@ -62,6 +62,8 @@ Keep Chromium memory core dumps disabled.
 
 ## Current work
 
+- [ ] Use the `googledot-blue` cursor design for the AI co-cursor, recolored
+  to the user's system accent color. User request (2026-11-01).
 - [ ] Fix multiple keyboard layout support. User report (2026-11-01): Gnosis
   appears to recognize only one configured layout. Verify layout detection and
   live switching for typing and shortcuts in the GTK shell and embedded Brave.
