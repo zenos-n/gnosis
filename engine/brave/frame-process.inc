@@ -108,6 +108,7 @@
         return G_SOURCE_REMOVE;
       },new Resume{weak_from_this(),child},+[](gpointer data){delete static_cast<Resume*>(data);});
       attach_frames(child);
+      command("Emulation.setEmulatedMedia", web_color_scheme(), child);
       command("Page.enable","{}",child); command("Network.enable","{}",child);
       command("Page.getFrameTree","{}",child,[weak=weak_from_this(),child](JsonObject* result,const std::string&) {
         auto process=weak.lock();if(!process||!result)return;

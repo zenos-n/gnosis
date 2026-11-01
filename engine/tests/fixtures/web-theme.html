@@ -1,0 +1,35 @@
+<!doctype html>
+<title>Gnosis website theme fixture</title>
+<style>
+body { color: rgb(1, 2, 3); }
+@media (prefers-color-scheme: dark) { body { color: rgb(4, 5, 6); } }
+</style>
+<script>
+const media = matchMedia('(prefers-color-scheme: dark)');
+window.initialDark = media.matches;
+window.themeChanges = [];
+window.childTheme = null;
+function reportTheme() {
+    if (parent !== window) parent.postMessage({
+        initialDark, dark: media.matches, changes: themeChanges,
+        color: getComputedStyle(document.body).color
+    }, '*');
+}
+media.addEventListener('change', event => {
+    themeChanges.push(event.matches);
+    reportTheme();
+});
+addEventListener('message', event => {
+    if (event.source === document.querySelector('iframe')?.contentWindow)
+        childTheme = event.data;
+});
+addEventListener('DOMContentLoaded', () => {
+    if (parent !== window) reportTheme();
+    else {
+        const frame = document.createElement('iframe');
+        frame.src = `http://localhost:${location.port}/web-theme.html?child`;
+        document.body.append(frame);
+    }
+});
+</script>
+<p>System theme fixture</p>

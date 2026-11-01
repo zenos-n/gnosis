@@ -37,6 +37,10 @@
 namespace GnosisBrave {
 namespace {
 std::string profile_root;
+std::string web_color_scheme() {
+  return "{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":" +
+    quote(adw_style_manager_get_dark(adw_style_manager_get_default()) ? "dark" : "light") + "}]}";
+}
 bool automation_mode = false;
 bool vim_mode = false;
 const std::string popup_layout = R"CSS(
@@ -1589,6 +1593,10 @@ void Page::theme_document(const std::string& frame, const std::string& loader) {
 void Page::update_web_theme() {
   auto& s = *state_;
   if (s.disposed || !s.theme_ready) return;
+  command("Emulation.setEmulatedMedia", web_color_scheme());
+  for (const auto& [source, frame] : s.process->frame_sessions)
+    if (frame.owner.lock().get() == this)
+      s.process->command("Emulation.setEmulatedMedia", web_color_scheme(), source);
   const auto css = webpage_theme(s.content) + (adapter_enabled("popup-sizing") && s.extension_popup && uri.starts_with("chrome-extension://") ? popup_layout : "") +
     ((uri.starts_with("https://") || uri.starts_with("http://") || uri.starts_with("file://")) ? (adapter_enabled("user-content") ? user_stylesheet : "") : "");
   for (const auto& [frame, style] : s.theme_frames) {
@@ -1608,6 +1616,7 @@ void Page::attach() {
   command("Page.enable"); command("Runtime.enable"); command("Network.enable"); command("Security.enable");
   state_->protocol_ready = false;
   state_->theme_ready = true; state_->theme_frames.clear(); ++state_->theme_generation;
+  update_web_theme();
   command("Runtime.addBinding", "{\"name\":\"__gnosisContextMenu\",\"executionContextName\":\"GnosisContextMenu\"}");
   g_autofree char* menu_path = g_build_filename(GNOSIS_NATIVE_INTEGRATION_DIR, "context-menu.js", nullptr);
   g_autofree char* menu_script = nullptr;

@@ -61,6 +61,14 @@ The find probe checks counts/ordinals, next/previous, case sensitivity, hidden
 unsupported options, empty queries, reopening and Unicode. It saves only the
 GTK toolbar to `/tmp/gnosis-find-toolbar.png`.
 
+`web-theme-gtk-probe.cpp` uses the same compile flags and `web-theme.html`.
+Run it with the fixture server above, `about:blank`, a disposable profile and
+`GSETTINGS_BACKEND=memory`. It forces GTK dark/light/dark transitions inside the
+test process and checks initial inline-script values, CSS media queries and
+`matchMedia` change events in regular/private tabs and cross-process iframes.
+A new regular tab must inherit light after switching. `GNOSIS_THEME_FIXTURE`
+can override the default `http://127.0.0.1:18473/web-theme.html` URL.
+
 `native-cursor-gtk-probe.cpp` needs an HTTP fixture (any local document). It
 checks text/link/autoscroll cursors and actual middle-click scrolling, then
 opens real GTK tabs through middle-click, noopener and target-blank links.
