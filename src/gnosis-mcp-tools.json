@@ -16,8 +16,8 @@
       }
     },
     {
-      "name": "list_tabs",
-      "description": "List tabs available in the user-selected mode. Private tabs are excluded.",
+      "name": "list_windows",
+      "description": "List available browsing windows with titles, focus, selection and tabs. Private windows and windows outside the user-selected mode are excluded.",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -31,14 +31,60 @@
       }
     },
     {
+      "name": "activate_window",
+      "description": "Select and present a browsing window. Subsequent calls without tab_id or window_id use this window until another is selected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "description": "Window ID from list_windows."
+          }
+        },
+        "required": [
+          "window_id"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_tabs",
+      "description": "List tabs available in the user-selected mode. Optionally filter by window_id. Private tabs are excluded.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window_id": {
+            "type": "string",
+            "description": "Window ID from list_windows. Omit to list tabs in all available windows."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "open_tab",
-      "description": "Open a tab in the selected mode and wait for loading.",
+      "description": "Open a tab in the selected window, or an explicit window_id, and wait for loading.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string",
             "description": "An http://, https:// or about:blank URL."
+          },
+          "window_id": {
+            "type": "string",
+            "description": "Window ID from list_windows. Omit to use the selected window, or the current browsing window before one is selected."
           }
         },
         "required": [],
@@ -58,7 +104,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs."
           }
         },
         "required": [
@@ -80,7 +126,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs."
           }
         },
         "required": [
@@ -102,7 +148,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "url": {
             "type": "string",
@@ -128,7 +174,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           }
         },
         "required": [],
@@ -148,7 +194,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           }
         },
         "required": [],
@@ -168,7 +214,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "screenshot": {
             "type": "boolean",
@@ -192,7 +238,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "ref": {
             "type": "string",
@@ -224,7 +270,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "ref": {
             "type": "string",
@@ -256,7 +302,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "ref": {
             "type": "string",
@@ -290,7 +336,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "x": {
             "type": "number",
@@ -331,7 +377,7 @@
         "properties": {
           "tab_id": {
             "type": "string",
-            "description": "Tab ID from list_tabs. Omit to use the current tab in the selected browsing mode."
+            "description": "Tab ID from list_tabs. Omit to use the current tab in the window chosen with activate_window (or the current browsing window before one is selected)."
           },
           "key": {
             "type": "string",

@@ -163,6 +163,16 @@ def run(args):
                     return next(element["ref"] for element in info["elements"] if element["name"] == name)
 
                 assert json.loads(client.call("get_state")["content"][0]["text"])["mode"] == "off"
+                if args.session_bus:
+                    bare_env = {key: value for key, value in os.environ.items() if key not in {
+                        "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY"}}
+                    bare = Client(args.mcp, bus, env=bare_env)
+                    try:
+                        bare.initialize()
+                        assert json.loads(bare.call("get_state")["content"][0]["text"])["mode"] == "off"
+                    finally:
+                        bare.close()
+                    print("MCP_DESKTOP_BUS_PASS browser reached without session/display environment", flush=True)
                 client.call("list_tabs", error=True)
                 action("ai-browsing-mode", "shared")
                 wait_for(lambda: native() and json.loads(state_file.read_text())["mode"] == "shared")
@@ -223,11 +233,45 @@ def run(args):
                 client = competitor
                 print("MCP_OWNER_PASS controller lease and disconnect recovery", flush=True)
 
+                def window_list():
+                    return json.loads(client.call("list_windows")["content"][0]["text"])["windows"]
+
+                assert [window["window_id"] for window in window_list()] == [user["window_id"]]
+                client.call("activate_window", {"window_id": "missing"}, error=True)
+                client.call("open_tab", {"window_id": "missing"}, error=True)
+                action("new-window")
+                windows = wait_for(lambda: window_list() if len(window_list()) == 2 else None)
+                second_id = next(window["window_id"] for window in windows if window["window_id"] != user["window_id"])
+                selected = json.loads(client.call("activate_window", {"window_id": second_id})["content"][0]["text"])
+                assert selected["selected"] and selected["tabs"]
+                second_tab = json.loads(client.call("open_tab", {"url": url + "/second"})["content"][0]["text"])
+                assert second_tab["window_id"] == second_id
+                # Reordering GTK windows must not redirect default operations.
+                client.call("activate_window", {"window_id": user["window_id"]})
+                targeted = json.loads(client.call("open_tab", {"window_id": second_id, "url": url + "/second"})["content"][0]["text"])
+                assert targeted["window_id"] == second_id
+                assert "Second page" in snapshot()[0]["text"]
+                assert next(window for window in window_list() if window["selected"])["window_id"] == second_id
+                second_tabs = json.loads(client.call("list_tabs", {"window_id": second_id})["content"][0]["text"])["tabs"]
+                assert second_tabs and all(tab["window_id"] == second_id for tab in second_tabs)
+                client.call("activate_tab", {"tab_id": user_id})
+                assert "Gnosis MCP fixture" in snapshot()[0]["text"]
+                client.call("activate_window", {"window_id": second_id})
+                for tab in second_tabs:
+                    client.call("close_tab", {"tab_id": tab["tab_id"]})
+                wait_for(lambda: all(window["window_id"] != second_id for window in window_list()))
+                client.call("snapshot", {"screenshot": False}, error=True)
+                client.call("open_tab", error=True)
+                client.call("activate_window", {"window_id": user["window_id"]})
+                print("MCP_WINDOWS_PASS native window discovery, explicit targeting, persistent selection, closed-window refusal", flush=True)
+
                 action("ai-browsing-mode", "separate")
                 wait_for(lambda: any(window["ai_window"] for window in native()))
                 ai = json.loads(client.call("open_tab", {"url": url + "/?ai"})["content"][0]["text"])
                 assert ai["window_id"] != user["window_id"] and ai["tab_id"] != user_id
                 assert all(tab["window_id"] != user["window_id"] for tab in tab_list())
+                assert all(window["window_id"] != user["window_id"] for window in window_list())
+                client.call("activate_window", {"window_id": user["window_id"]}, error=True)
                 client.call("snapshot", {"tab_id": user_id}, error=True)
                 ai_info, _ = snapshot(ai["tab_id"])
                 assert "gnosis_fixture=shared" in ai_info["text"]
@@ -238,6 +282,7 @@ def run(args):
                 client.call("close_tab", {"tab_id": closing["tab_id"]})
                 wait_for(lambda: all(tab["tab_id"] != closing["tab_id"] for tab in tab_list()))
                 action("ai-browsing-mode", "shared")
+                client.call("activate_window", {"window_id": ai["window_id"]}, error=True)
                 client.call("snapshot", {"tab_id": ai["tab_id"]}, error=True)
                 assert all(tab["window_id"] == user["window_id"] for tab in tab_list())
                 print("MCP_SEPARATE_PASS own native window/tabs, shared profile, two-way mode isolation and normal close", flush=True)

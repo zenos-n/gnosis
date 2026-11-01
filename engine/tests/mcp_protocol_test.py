@@ -5,13 +5,15 @@ import json
 import os
 import select
 import subprocess
+import tempfile
+from pathlib import Path
 
 
 class Client:
-    def __init__(self, server, bus=None):
+    def __init__(self, server, bus=None, env=None):
         command = [str(server)] + (["--bus-name", bus] if bus else [])
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                                        stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
         self.sequence = 0
 
     def send(self, value):
@@ -65,7 +67,8 @@ def test(server):
         assert init["protocolVersion"] == "2025-11-25" and init["capabilities"] == {"tools": {}}
         tools = client.rpc("tools/list")["result"]["tools"]
         names = {tool["name"] for tool in tools}
-        assert {"snapshot", "click", "move", "type_text", "scroll", "press_key", "list_tabs", "open_tab"} <= names
+        assert {"snapshot", "click", "move", "type_text", "scroll", "press_key", "list_tabs", "open_tab",
+                "list_windows", "activate_window"} <= names
         assert "set_mode" not in names
         assert all(tool["inputSchema"]["additionalProperties"] is False for tool in tools)
         assert client.rpc("ping")["result"] == {}
@@ -89,6 +92,37 @@ def test(server):
         finally:
             client.close()
     print("MCP_PROTOCOL_PASS initialization, negotiation, schemas, framing, Unicode, errors, limits")
+
+    # A real isolated user bus establishes discovery without touching a browser.
+    with tempfile.TemporaryDirectory(prefix="gnosis-mcp-runtime-") as runtime:
+        address = "unix:path=" + str(Path(runtime) / "bus")
+        daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--address=" + address,
+                                   "--print-address=1"], stdout=subprocess.PIPE, text=True)
+        try:
+            assert daemon.stdout.readline().startswith(address)
+            env = dict(os.environ, XDG_RUNTIME_DIR=runtime)
+            for key in ["DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY"]:
+                env.pop(key, None)
+            client = Client(server, "com.neg_zero.Gnosis.MissingBrowser", env=env)
+            try:
+                client.initialize()
+                result = client.call("get_state", error=True)
+                assert "org.freedesktop.DBus.Error.NameHasNoOwner" in result["content"][0]["text"], result
+            finally:
+                client.close()
+            # An explicit address must never silently fall back to a different bus.
+            env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(Path(runtime) / "missing")
+            client = Client(server, "com.neg_zero.Gnosis.MissingBrowser", env=env)
+            try:
+                client.initialize()
+                result = client.call("get_state", error=True)
+                assert "Open Gnosis" not in result["content"][0]["text"], result
+            finally:
+                client.close()
+        finally:
+            daemon.terminate()
+            daemon.wait(timeout=5)
+    print("MCP_BUS_PASS desktop socket discovery without display/address; explicit bus isolation")
 
 
 if __name__ == "__main__":

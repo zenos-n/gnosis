@@ -24,6 +24,7 @@ GApplication* application = nullptr;
 GDBusConnection* connection = nullptr;
 guint registration = 0, owner_watch = 0;
 guint64 generation = 0;
+guint64 selected_window = 0;
 std::string mode = "off", controller;
 std::weak_ptr<Request> pending;
 EphyWindow* ai_window = nullptr;
@@ -113,13 +114,26 @@ std::vector<Tab> tabs() {
   }
   return result;
 }
+EphyWindow* find_window(JsonObject* args) {
+  auto id = string(args, "window_id", false, 20);
+  if (id.empty() && selected_window) id = std::to_string(selected_window);
+  for (auto tab : tabs()) {
+    if (id.empty() || id == std::to_string(ephy_window_get_uid(tab.window))) return tab.window;
+  }
+  throw std::runtime_error(id.empty() ? "No window is available in this browsing mode." :
+    "Window is closed, private, or outside the selected browsing mode. Use list_windows and activate_window to choose another.");
+}
 Tab find_tab(JsonObject* args, bool select) {
   auto id = string(args, "tab_id", false, 20);
+  auto* window = id.empty() ? find_window(args) : nullptr;
   auto available = tabs();
   for (auto tab : available) {
     if ((!id.empty() && id == std::to_string(ephy_web_view_get_uid(tab.view))) ||
-        (id.empty() && ephy_window_get_active_embed(tab.window) == tab.embed)) {
-      if (select) ephy_tab_view_select_page(ephy_window_get_tab_view(tab.window), GTK_WIDGET(tab.embed));
+        (id.empty() && tab.window == window && ephy_window_get_active_embed(tab.window) == tab.embed)) {
+      if (select) {
+        ephy_tab_view_select_page(ephy_window_get_tab_view(tab.window), GTK_WIDGET(tab.embed));
+        selected_window = ephy_window_get_uid(tab.window);
+      }
       return tab;
     }
   }
@@ -135,6 +149,19 @@ JsonObject* tab_info(const Tab& tab) {
   json_object_set_string_member(result, "title", title ? title : "");
   json_object_set_boolean_member(result, "active", ephy_window_get_active_embed(tab.window) == tab.embed);
   json_object_set_boolean_member(result, "loading", ephy_engine_web_view_is_loading(EPHY_ENGINE_VIEW(tab.view)));
+  return result;
+}
+JsonObject* window_info(EphyWindow* window) {
+  auto* result = json_object_new();
+  auto id = ephy_window_get_uid(window);
+  json_object_set_string_member(result, "window_id", std::to_string(id).c_str());
+  const char* title = gtk_window_get_title(GTK_WINDOW(window));
+  json_object_set_string_member(result, "title", title ? title : "");
+  json_object_set_boolean_member(result, "active", gtk_window_is_active(GTK_WINDOW(window)));
+  json_object_set_boolean_member(result, "selected", selected_window == id);
+  auto* array = json_array_new();
+  for (auto tab : tabs()) if (tab.window == window) json_array_add_object_element(array, tab_info(tab));
+  json_object_set_array_member(result, "tabs", array);
   return result;
 }
 EphyWindow* separate_window() {
@@ -382,7 +409,7 @@ void set_mode(GSimpleAction* action, GVariant* value, gpointer) {
   if (mode != next) {
     ++generation;
     if (auto request = pending.lock()) request->fail("AI browsing stopped or its mode changed.");
-    mode = next; controller.clear(); hide_cursors();
+    mode = next; controller.clear(); selected_window = 0; hide_cursors();
   }
   g_simple_action_set_state(action, value);
   if (mode == "separate") {
@@ -443,19 +470,36 @@ void execute(GDBusMethodInvocation* invocation, const std::string& name, JsonObj
   auto request = std::make_shared<Request>(invocation);
   pending = request; request->start();
   try {
+    if (name == "list_windows") {
+      g_autoptr(JsonObject) result = json_object_new();
+      auto* array = json_array_new();
+      std::vector<EphyWindow*> seen;
+      for (auto tab : tabs()) {
+        if (std::find(seen.begin(), seen.end(), tab.window) != seen.end()) continue;
+        seen.push_back(tab.window);
+        json_array_add_object_element(array, window_info(tab.window));
+      }
+      json_object_set_array_member(result, "windows", array); request->success(result); return;
+    }
+    if (name == "activate_window") {
+      auto* window = find_window(args);
+      selected_window = ephy_window_get_uid(window);
+      gtk_window_present(GTK_WINDOW(window));
+      g_autoptr(JsonObject) result = window_info(window); request->success(result); return;
+    }
     if (name == "list_tabs") {
       g_autoptr(JsonObject) result = json_object_new();
       auto* array = json_array_new();
-      for (auto tab : tabs()) json_array_add_object_element(array, tab_info(tab));
+      auto id = string(args, "window_id", false, 20);
+      auto* window = id.empty() ? nullptr : find_window(args);
+      for (auto tab : tabs()) if (!window || tab.window == window) json_array_add_object_element(array, tab_info(tab));
       json_object_set_array_member(result, "tabs", array); request->success(result); return;
     }
     if (name == "open_tab") {
       auto url = string(args, "url", false, 16384); if (url.empty()) url = "about:blank";
       if (!web_url(url)) throw std::runtime_error("Only http://, https:// and about:blank navigation is allowed.");
-      EphyWindow* window = nullptr;
-      if (mode == "separate") window = separate_window();
-      else for (auto tab : tabs()) { window = tab.window; break; }
-      if (!window) throw std::runtime_error("Open a normal browsing window before using shared mode.");
+      auto* window = find_window(args);
+      selected_window = ephy_window_get_uid(window);
       request->target_uri = url;
       request->view = EPHY_WEB_VIEW(g_object_ref(gnosis_mcp_new_tab(GTK_WINDOW(window), url.c_str())));
       request->loaded("", g_get_monotonic_time()); return;
@@ -584,14 +628,14 @@ void gnosis_mcp_start(GApplication* app) {
       const char *name, *old_owner, *new_owner; g_variant_get(params, "(&s&s&s)", &name, &old_owner, &new_owner);
       if (!controller.empty() && controller == name && !*new_owner) {
         ++generation; if (auto request = pending.lock()) request->fail("MCP client disconnected.");
-        controller.clear(); hide_cursors();
+        controller.clear(); selected_window = 0; hide_cursors();
       }
     }, nullptr, nullptr);
 }
 void gnosis_mcp_stop() {
   ++generation;
   if (auto request = pending.lock()) request->fail("The browser is shutting down.");
-  hide_cursors(); controller.clear(); mode = "off";
+  hide_cursors(); controller.clear(); selected_window = 0; mode = "off";
   if (connection && owner_watch) g_dbus_connection_signal_unsubscribe(connection, owner_watch);
   if (connection && registration) g_dbus_connection_unregister_object(connection, registration);
   registration = owner_watch = 0; connection = nullptr; application = nullptr;
