@@ -62,6 +62,10 @@ Keep Chromium memory core dumps disabled.
 
 ## Current work
 
+- [ ] Fix multiple keyboard layout support. User report (2026-11-01): Gnosis
+  appears to recognize only one configured layout. Verify layout detection and
+  live switching for typing and shortcuts in the GTK shell and embedded Brave.
+  Cause and reproduction remain unverified.
 - [x] USB, HID and Serial device choosers use GTK with native device models,
   revision checks and native grant/cancel callbacks. Fixed the GTK list callback
   lifetime crash; full GTK USB selection passed and the user confirmed all three
