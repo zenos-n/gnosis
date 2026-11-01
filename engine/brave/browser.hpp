@@ -58,7 +58,7 @@ public:
   bool is_internal_page(const std::string&) const;
   bool send_page_message(const std::string&, const std::string&, const std::string&);
   void start();
-  void set_extension_popup(bool);
+  void set_extension_popup(bool, int owner_tab_id = -1);
   void navigate(const std::string&);
   void command(const std::string&, const std::string& = "{}", Reply = {});
   // Route a trusted engine command through the session that owns this frame.

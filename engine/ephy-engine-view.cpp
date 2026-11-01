@@ -947,6 +947,11 @@ gboolean ephy_engine_web_view_set_extension_popup(EphyEngineView *popup, EphyEng
   auto *view = data(popup), *parent = data(owner);
   if (view == parent || view->disposed || parent->disposed || view->host.private_mode ||
       parent->host.private_mode || parent->browser->is_extension_popup || view->browser->loaded) return false;
+  if (auto page = parent->browser->brave_page()) {
+    const int tab = page->native_tab_id();
+    if (tab < 0) return false;
+    view->browser->extension_owner_tab_id = tab;
+  }
   view->browser->is_extension_popup = true;
   g_weak_ref_set(&view->extension_owner, owner);
   return true;

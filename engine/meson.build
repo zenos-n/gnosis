@@ -95,6 +95,8 @@ install_subdir('data/extension-manager', install_dir: pkgdatadir)
 install_subdir('data/native-integration', install_dir: pkgdatadir)
 install_data(cef_root / 'LICENSE.txt', cef_root / 'CREDITS.html', install_dir: datadir / 'licenses/gnosis-cef')
 if get_option('unit_tests').enabled()
+  test('Native extension popup owner', find_program('node'),
+    args: [files('tests/popup-owner-test.js'), files('data/native-integration/popup-owner.js')])
   test('Brave navigation target adapter', find_program('node'),
     args: [files('tests/native-navigation-target-test.js'), files('data/native-integration/navigation-target.js')])
   test('KeePassXC shared associations', find_program('node'),

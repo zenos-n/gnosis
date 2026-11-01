@@ -69,6 +69,17 @@ test process and checks initial inline-script values, CSS media queries and
 A new regular tab must inherit light after switching. `GNOSIS_THEME_FIXTURE`
 can override the default `http://127.0.0.1:18473/web-theme.html` URL.
 
+`extension-popup-gtk-probe.cpp` opens the real Extensions menu and uBlock action
+twice, checking its native browser session, owning hostname, background readiness,
+visible sizing and Back/reopen behavior. Start the disposable browser on an HTTP
+fixture at `127.0.0.1`. Optionally set `GNOSIS_POPUP_TEST_EXTENSION` to a disposable
+copy of Consent-O-Matic's extension files (exclude `_metadata`) under the test
+profile's `brave/Default/Extensions/<id>/<version>_0` to run the same open/reopen
+checks and verify its owning site. No extension profile/storage files are needed.
+Popup captures are saved as `/tmp/gnosis-extension-popup-{0,1,2,3}.png`.
+`node engine/tests/popup-owner-test.js` checks native query forwarding, unchanged
+filters/results/errors, callback/promise support and excluded/private contexts.
+
 `native-cursor-gtk-probe.cpp` needs an HTTP fixture (any local document). It
 checks text/link/autoscroll cursors and actual middle-click scrolling, then
 opens real GTK tabs through middle-click, noopener and target-blank links.

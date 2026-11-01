@@ -171,6 +171,7 @@ struct Page::State {
   int window = -1, width = 0, height = 0;
   int native_tab = -1;
   bool extension_popup = false;
+  int popup_owner_tab_id = -1;
   int popup_width = 0, popup_height = 0;
   double zoom_requested = 1, zoom_applied = 1;
   bool zoom_pending = false, zoom_busy = false;
@@ -1428,7 +1429,9 @@ std::shared_ptr<Page> Page::create(GtkWidget* widget, bool ephemeral) { return s
 Page::~Page() { close(); }
 GtkWidget* Page::widget() const { return state_->content; }
 bool Page::is_closed() const { return state_->disposed; }
-void Page::set_extension_popup(bool enabled) { state_->extension_popup = enabled; }
+void Page::set_extension_popup(bool enabled, int owner_tab_id) {
+  state_->extension_popup = enabled; state_->popup_owner_tab_id = owner_tab_id;
+}
 void Page::start() {
   if (state_->started || state_->disposed) return;
   auto* root = gtk_widget_get_root(state_->content); if (!root || !GTK_IS_NATIVE(root)) return;
@@ -1617,6 +1620,14 @@ void Page::attach() {
   state_->protocol_ready = false;
   state_->theme_ready = true; state_->theme_frames.clear(); ++state_->theme_generation;
   update_web_theme();
+  if (state_->extension_popup && !state_->ephemeral && state_->popup_owner_tab_id >= 0) {
+    g_autofree char* path = g_build_filename(GNOSIS_NATIVE_INTEGRATION_DIR, "popup-owner.js", nullptr);
+    g_autofree char* source = nullptr;
+    if (g_file_get_contents(path, &source, nullptr, nullptr))
+      command("Page.addScriptToEvaluateOnNewDocument", "{\"source\":" +
+        quote("(" + std::string(source) + ")(" + std::to_string(state_->popup_owner_tab_id) + ");") + "}");
+    else g_warning("The extension popup owner adapter could not be loaded");
+  }
   command("Runtime.addBinding", "{\"name\":\"__gnosisContextMenu\",\"executionContextName\":\"GnosisContextMenu\"}");
   g_autofree char* menu_path = g_build_filename(GNOSIS_NATIVE_INTEGRATION_DIR, "context-menu.js", nullptr);
   g_autofree char* menu_script = nullptr;

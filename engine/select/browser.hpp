@@ -54,6 +54,7 @@ public:
   bool gpu_frames = false;
   bool custom_cursor_seen = false;
   bool is_extension_popup = false;
+  int extension_owner_tab_id = -1;
   bool is_auth_popup = false;
   bool is_home = false;
   void start();

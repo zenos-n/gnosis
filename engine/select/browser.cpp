@@ -340,10 +340,14 @@ void Browser::changed() {
 void Browser::start() {
   if (GnosisBrave::enabled()) {
     // Mapping an existing tab must not navigate it again.
-    if (loaded || closing) return;
+    if (closing) return;
+    if (loaded) {
+      if (brave_) brave_->start(); // An unparented view could not start until mapped.
+      return;
+    }
     if (!brave_) {
       brave_ = GnosisBrave::Page::create(area_, host && host->private_mode);
-      brave_->set_extension_popup(is_extension_popup);
+      brave_->set_extension_popup(is_extension_popup, extension_owner_tab_id);
       brave_->popup_size_changed = [this](int width, int height) {
         if (!closing && on_popup_size) on_popup_size(width, height);
       };
