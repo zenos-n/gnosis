@@ -26,7 +26,9 @@ the other C++ GTK probes, then run `native-touch-gtk-test.py --gnosis "$GNOSIS"
 temporary profile and process group, and bounds cleanup. The probe temporarily
 fullscreens only its own window and uses its own Mutter RemoteDesktop/ScreenCast
 session for actual touchscreen events; DevTools only observes fixture state.
-It uses the HDMI monitor without changing display configuration. It checks
+It uses DisplayPort by default (`--monitor DP`), or the explicitly selected
+connector, e.g. `--monitor HDMI`, without changing display configuration. These
+physical-device checks take focus; do not run them while the user is playing. It checks
 trusted taps, six contacts, scrolling and post-release momentum, pinch in/out, the 15% edge zones,
 back/forward, the live setting, vertical/multi-finger rejection, and unmap cleanup.
 It stops its input session before quitting. `--preview` checks actual destination
@@ -175,3 +177,14 @@ reload, configures only local fixture filters, and changes real GSettings.
 It checks native enablement plus actual cosmetic/scriptlet filtering off/on.
 A timeout or `_FAIL` output is a failed check. Isolated portal startup may take
 25 seconds; allow at least two minutes for a whole GTK process.
+
+
+`native-external-gtk-probe.cpp` and `native-external-gtk-test.py` exercise the
+actual Chromium external-protocol dialog through the GTK shell on an isolated
+Xvfb display and private session bus. Compile with the standard preload flags,
+then run `native-external-gtk-test.py --gnosis "$GNOSIS" --probe "$PROBE"
+--xvfb /path/to/Xvfb`. The runner registers a log-only custom URI handler inside
+its temporary XDG directories. It checks Cancel, Open once, an initially unchecked
+remember checkbox, per-origin grants, private-context isolation, exact URI delivery and navigation cleanup.
+No desktop input, physical monitor or human protocol-handler registration is
+used. This does not launch Prism or exercise a real OAuth account.

@@ -235,14 +235,15 @@ static gboolean start(gpointer) {
   auto *view=getview(embed(window));host=find(view);page=getpage(view);
   if(!host||!page||page->loading||page->uri.find("native-touch.html")==std::string::npos)return G_SOURCE_CONTINUE;
   if(!monitor_selected) {
+    const char *connector=g_getenv("GNOSIS_TOUCH_MONITOR");if(!connector||!*connector)connector="DP";
     auto *monitors=gdk_display_get_monitors(gdk_display_get_default());
     for(guint i=0;i<g_list_model_get_n_items(monitors);i++) {
       auto *monitor=GDK_MONITOR(g_list_model_get_item(monitors,i));
       const char *name=gdk_monitor_get_connector(monitor);
-      if(name&&strstr(name,"HDMI")){gtk_window_fullscreen_on_monitor(window,monitor);monitor_selected=true;}
+      if(name&&strstr(name,connector)){gtk_window_fullscreen_on_monitor(window,monitor);monitor_selected=true;}
       g_object_unref(monitor);if(monitor_selected)return G_SOURCE_CONTINUE;
     }
-    fail("HDMI test monitor not available");
+    fail("requested test monitor not available");
   }
   if(!gtk_window_is_fullscreen(window))return G_SOURCE_CONTINUE;
   width=gtk_widget_get_width(host);height=gtk_widget_get_height(host);

@@ -133,5 +133,22 @@
   "authenticator_account_select_rva": "0xc1274f0",
   "authenticator_account_select_bytes": "554889e54863c6488947585dc3",
   "authenticator_account_description_rva": "0xbb5fc40",
-  "authenticator_account_description_bytes": "554889e54156534883ec204889f04889fb80beb800000001"
+  "authenticator_account_description_bytes": "554889e54156534883ec204889f04889fb80beb800000001",
+  "external_show_rva": "0x112360b0",
+  "external_show_bytes": "554889e541574156534883ec184889fb",
+  "external_create_rva": "0x11236140",
+  "external_create_bytes": "554889e5415741564154534989f64889fb488d7e",
+  "external_destroy_rva": "0xbec3c10",
+  "external_destroy_bytes": "554889e54156534889fb488d05d7111307",
+  "external_title_rva": "0xbec4030",
+  "external_title_bytes": "554889e54156534883ec204889f04889fb0f57c0",
+  "external_embedder_rva": "0x61c7a30",
+  "external_embedder_bytes": "554889e54156534883ec204889fb488bbfe00000",
+  "external_toplevel_rva": "0x6034310",
+  "external_toplevel_bytes": "554889e5415741564154534989ff488d3db31165",
+  "external_checkbox_visible_rva": "0xe275830",
+  "external_checkbox_visible_bytes": "554889e5488bbf900300004885ff74065de9ea7a",
+  "external_checkbox_text_rva": "0xe243180",
+  "external_checkbox_text_bytes": "554889e5488b87c8040000488b8858030000480f",
+  "external_vtable_rva": "0x12ff4df8"
 }

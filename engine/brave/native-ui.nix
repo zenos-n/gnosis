@@ -42,6 +42,7 @@ let
       cat ${debugConfig} >> gnosis-native-install-config.h
       cp ${./native-authenticator-ui.inc} native-authenticator-ui.inc
       cp ${./native-find.inc} native-find.inc
+      cp ${./native-external-ui.inc} native-external-ui.inc
       cp ${./native-close.inc} native-close.inc
       $CC -shared -fPIC -O2 -Wall -Wextra ${./native-install-ui.c} ${./native-notifications.c} -I. \
         $(pkg-config --cflags --libs glib-2.0 json-glib-1.0 dbus-1) -ldl -o native-install-ui.so

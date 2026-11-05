@@ -24,7 +24,7 @@ struct Request {
   Request *next;
   void *widget, *view, *checkbox;
   gint64 id, created;
-  gboolean permission, once, chooser, file_access, uninstall, authenticator;
+  gboolean permission, once, chooser, file_access, uninstall, authenticator, external;
   guint64 revision;
 };
 static uintptr_t image;
@@ -135,12 +135,14 @@ static void destroy_permission(void *view) {
   original_permission_destroy(view);
 }
 
+static void decide_external(Request *, gboolean, const char *);
 static void decide_chooser(Request *, gboolean, const char *);
 static void decide_file_access(Request *, gboolean);
 static void decide_uninstall(Request *, gboolean, const char *);
 static void decide_authenticator(Request *, gboolean, const char *);
 
 static void decide(Request *request, gboolean accept, const char *choice) {
+  if (request->external) { decide_external(request, accept, choice); return; }
   if (request->authenticator) { decide_authenticator(request, accept, choice); return; }
   if (request->chooser) { decide_chooser(request, accept, choice); return; }
   if (request->file_access) { decide_file_access(request, accept); return; }
@@ -958,6 +960,7 @@ static void download_begin(void *handler, void *frame, void *item) {
 
 #include "native-authenticator-ui.inc"
 #include "native-find.inc"
+#include "native-external-ui.inc"
 
 #include "native-close.inc"
 
@@ -1176,6 +1179,7 @@ __attribute__((constructor)) static void initialize(void) {
   absolute_jump(jump, authenticator_show);
   if (!replace_code(UI_AUTHENTICATOR_SHOW_RVA, jump, 14)) _exit(126);
   if (!input_watch) input_watch = g_unix_fd_add(channel, G_IO_IN | G_IO_HUP | G_IO_ERR, receive_response, NULL);
+  if (!native_external_install()) { g_printerr("Gnosis external applications: unsupported binary; keeping native dialog\n"); }
   if (!native_close_install()) { g_printerr("Gnosis close checks: unsupported binary\n"); close(channel); channel = -1; return; }
   if (!native_find_install()) g_printerr("Gnosis native find: unsupported binary; find disabled\n");
   g_printerr("Gnosis native install UI: exact-binary presentation hook ready\n");

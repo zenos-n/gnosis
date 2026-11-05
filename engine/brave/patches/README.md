@@ -199,7 +199,7 @@ checks verified alert/confirm/prompt decisions; beforeunload coverage is pending
 | USB / HID / serial and other device chooser callers | `chrome/browser/ui/views/permissions/chooser_bubble_ui.cc`: `ShowDeviceChooserDialog` | Bridge the `permissions::ChooserController` choice list, updates and accept/cancel callbacks. This is separate from the ordinary permission factory and is not an exhaustive map of every device-specific chooser. |
 | Passkeys / security keys | `chrome/browser/ui/views/webauthn/authenticator_request_dialog_view.cc`: `AuthenticatorRequestDialogView::Show` / `ReplaceCurrentSheetWith` | The controller at `chrome/browser/webauthn/authenticator_request_dialog_controller.cc` drives a multi-step model. GTK must handle model transitions and responses, not just hide the dialog. |
 | JavaScript alert / confirm / prompt | `chrome/browser/ui/views/javascript_tab_modal_dialog_view_views.cc`: `JavaScriptTabModalDialogViewViews` | Replace the native view and preserve success/cancel/text and forced-close callbacks. Separate app-modal paths may also need coverage. |
-| Open external application | `chrome/browser/ui/views/external_protocol_dialog.cc`: `ExternalProtocolHandler::RunExternalProtocolDialog` | GTK confirmation must return the user's decision without automatically opening the external handler. |
+| Open external application | `chrome/browser/ui/views/external_protocol_dialog.cc`: `ExternalProtocolHandler::RunExternalProtocolDialog` | Native libadwaita confirmation, routed by exact WebContents/CDP target; retains Chromium's launch callback and origin/protocol-specific grants. |
 
 Brave-specific source wrapping verified at the pinned tag:
 
@@ -370,3 +370,25 @@ revert, invalid-language and stale-sequence probes pass; the packaged GTK submen
 also translates and restores actual page content without a dialog. Language
 selection currently exposes the common supported languages in the GTK list;
 translation itself remains upstream, including native unsupported-language errors.
+
+
+### External application confirmation
+
+`native-external-ui.inc` recognizes only the pinned ExternalProtocolDialog
+vtable at ShowWebModalDialogViews. It creates the same owned native widget and
+parent observer without showing a second Views modal, then presents the native
+localized title/body/buttons and optional checkbox in the owning GTK tab. The
+existing inherited SOCK_SEQPACKET channel returns Cancel/Open/remember to the
+original DialogDelegate callback. Chromium retains handler lookup, initiating
+origin/document, external-launch policy and remembered origin/protocol grants.
+The checkbox starts unchecked and is omitted when native policy omits it.
+Navigation, hidden tabs, parent destruction and channel loss cancel the request;
+unknown or hidden targets never borrow another tab. The existing 500 ms input
+guard remains, and Cancel is the default/close response. `external-apps` in
+Debugging restores the upstream prompt for diagnosis. Every new native entry
+is checked against the exact supported ELF digest and instruction prefix.
+
+Reference: Chromium 155.0.8059.40
+[external_protocol_dialog.cc](https://github.com/chromium/chromium/blob/155.0.8059.40/chrome/browser/ui/views/external_protocol_dialog.cc).
+The adapter is original GPL code; the upstream BSD implementation remains in
+the browser and is called in place.

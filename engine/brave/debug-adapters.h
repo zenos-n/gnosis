@@ -26,6 +26,7 @@ static const GnosisBraveAdapter gnosis_brave_adapters[] = {
   {"permission-dialogs", "Native Dialogs", "Permission Prompts", "GTK replacements for website permission prompts."},
   {"extension-dialogs", "Native Dialogs", "Extension Install and Remove Prompts", "GTK replacements for extension confirmation dialogs."},
   {"device-choosers", "Native Dialogs", "Device Choosers", "GTK Bluetooth, USB, serial and HID device selection."},
+  {"external-apps", "Native Dialogs", "External Applications", "GTK confirmation before opening website links in another application."},
   {"file-access", "Native Dialogs", "File Access Prompts", "GTK permission prompts for File System Access."},
   {"screen-capture", "Native Dialogs", "Screen Sharing", "The screen-sharing portal and GTK confirmation bridge."},
   {"passkeys", "Native Dialogs", "Passkeys and Security Keys", "GTK presentation of Chromium authenticator dialogs. Separate from KeePassXC."},

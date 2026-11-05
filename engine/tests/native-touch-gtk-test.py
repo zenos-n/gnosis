@@ -14,6 +14,7 @@ import threading
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--gnosis', required=True, type=Path)
 parser.add_argument('--probe', required=True, type=Path)
+parser.add_argument('--monitor', default='DP', help='Physical connector to use for this focus-taking test (default: DisplayPort)')
 parser.add_argument('--preview', action='store_true', help='Check actual history-swipe preview pixels')
 parser.add_argument('--trackpad', action='store_true', help='Check continuous pointer scrolling and momentum')
 parser.add_argument('--log', type=Path, default=Path('/tmp/gnosis-native-touch.log'))
@@ -26,6 +27,7 @@ threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     with tempfile.TemporaryDirectory(prefix='gnosis-native-touch-') as profile, args.log.open('w') as log:
         env = dict(os.environ, GSETTINGS_BACKEND='memory', LD_PRELOAD=str(args.probe.resolve()))
+        env['GNOSIS_TOUCH_MONITOR'] = args.monitor
         if args.preview:
             env['GNOSIS_TOUCH_PREVIEW_TEST'] = '1'
         if args.trackpad:

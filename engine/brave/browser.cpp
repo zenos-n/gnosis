@@ -211,6 +211,7 @@ struct Page::State {
   std::string document_request, document_request_url;
   gulong install_response = 0;
   gint64 install_id = 0;
+  bool install_external = false;
   guint install_delay = 0;
   std::map<int, std::string> menu_contexts, menu_frames, menu_sessions, metadata_contexts, metadata_unique;
   int vim_context = 0;
@@ -1258,8 +1259,12 @@ public:
             !enabled || json_node_get_value_type(enabled) != G_TYPE_BOOLEAN) { close_native_ui(); return; }
         for (guint i = 0; i < json_array_get_length(json_node_get_array(options)); ++i)
           if (json_node_get_value_type(json_array_get_element(json_node_get_array(options), i)) != G_TYPE_STRING) { close_native_ui(); return; }
-      } else if (kind == "uninstall") {
+      } else if (kind == "uninstall" || kind == "external-app") {
         if (!*text(message, "cancel")) json_object_set_string_member(message, "cancel", _("Cancel"));
+        if (kind == "external-app") {
+          auto* target = json_object_get_member(message, "target");
+          if (!target || json_node_get_value_type(target) != G_TYPE_STRING || strlen(json_node_get_string(target)) > 128) { close_native_ui(); return; }
+        }
         auto* checkbox = json_object_get_member(message, "checkbox");
         auto* checked = json_object_get_member(message, "checked");
         if ((checkbox && json_node_get_value_type(checkbox) != G_TYPE_STRING) ||
@@ -1281,6 +1286,14 @@ public:
           page->show_install_dialog(message); updated = true; break;
         }
         if (updated) continue;
+      }
+      if (kind == "external-app") {
+        auto found = targets.find(text(message, "target"));
+        auto owner = found != targets.end() ? found->second.lock() : nullptr;
+        if (owner && !owner->is_closed() && owner->state_->mapped && gtk_widget_get_mapped(owner->widget()))
+          owner->show_install_dialog(message);
+        else native_decide(id, false);
+        continue;
       }
       // This is a browser-owned confirmation. Use only this process's visible
       // page in the active GTK window; never borrow a private/normal window.
@@ -1992,6 +2005,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
   } else if (method == "Fetch.requestPaused") {
     internal_request(params);
   } else if (method == "Runtime.executionContextsCleared") {
+    if (state_->install_external) dismiss_install_dialog(true);
     set_vim_context(0); dismiss_vim_commands();
     dismiss_context_menu(); state_->menu_contexts.clear(); state_->menu_frames.clear(); state_->menu_sessions.clear(); state_->metadata_contexts.clear(); state_->metadata_unique.clear();
     state_->context_id = 0; state_->context_unique.clear();
@@ -2452,6 +2466,7 @@ void Page::dismiss_context_menu() {
 void Page::dismiss_install_dialog(bool cancel) {
   auto& s = *state_;
   const gint64 id = std::exchange(s.install_id, 0);
+  s.install_external = false;
   if (s.install_delay) { g_source_remove(s.install_delay); s.install_delay = 0; }
   if (s.install_dialog) {
     auto* dialog = std::exchange(s.install_dialog, nullptr);
@@ -2514,6 +2529,7 @@ void Page::show_install_dialog(JsonObject* message) {
   auto& s = *state_;
   const bool chooser = !strcmp(text(message, "kind"), "chooser");
   const bool uninstall = !strcmp(text(message, "kind"), "uninstall");
+  const bool external = !strcmp(text(message, "kind"), "external-app");
   if (chooser && s.install_dialog && s.install_id == json_object_get_int_member(message, "id")) {
     populate_device_chooser(ADW_ALERT_DIALOG(s.install_dialog), message); return;
   }
@@ -2521,6 +2537,7 @@ void Page::show_install_dialog(JsonObject* message) {
   dismiss_translation();
   dismiss_context_menu();
   s.install_id = json_object_get_int_member(message, "id");
+  s.install_external = external;
   auto* root = gtk_widget_get_root(s.content);
   if (!s.mapped || !root || !GTK_IS_WINDOW(root)) { dismiss_install_dialog(true); return; }
   if (s.surface && GNOSIS_IS_COMPOSITOR_VIEW(s.surface))
@@ -2529,7 +2546,7 @@ void Page::show_install_dialog(JsonObject* message) {
   // Plain labels prevent extension names or warning text injecting markup.
   const bool permission = !strcmp(text(message, "kind"), "permission");
   const bool once = permission && json_object_get_boolean_member(message, "once");
-  auto* dialog = uninstall ? adw_alert_dialog_new(text(message, "title"), nullptr) :
+  auto* dialog = (uninstall || external) ? adw_alert_dialog_new(text(message, "title"), nullptr) :
     adw_alert_dialog_new(!strcmp(text(message, "kind"), "file-access") ? _("File Access") : chooser ? _("Connect a Device") : permission ? _("Website Permission") : _("Extension Confirmation"), text(message, "title"));
   s.install_dialog = ADW_DIALOG(g_object_ref_sink(dialog));
   adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "cancel", text(message, "cancel"));
@@ -2561,14 +2578,21 @@ void Page::show_install_dialog(JsonObject* message) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), box);
     adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), scroll);
   }
-  if (uninstall && *text(message, "checkbox")) {
+  if ((uninstall || external) && *text(message, "checkbox")) {
     auto* check = gtk_check_button_new_with_label(text(message, "checkbox"));
     gtk_check_button_set_active(GTK_CHECK_BUTTON(check), json_object_get_boolean_member_with_default(message, "checked", false));
+    if (external) {
+      auto* label = gtk_check_button_get_child(GTK_CHECK_BUTTON(check));
+      if (GTK_IS_LABEL(label)) { gtk_label_set_wrap(GTK_LABEL(label), true); gtk_label_set_max_width_chars(GTK_LABEL(label), 48); }
+    }
     auto* extra = adw_alert_dialog_get_extra_child(ADW_ALERT_DIALOG(dialog));
-    if (extra && GTK_IS_SCROLLED_WINDOW(extra))
-      gtk_box_append(GTK_BOX(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(extra))), check);
+    if (extra && GTK_IS_SCROLLED_WINDOW(extra)) {
+      auto* content = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(extra));
+      if (GTK_IS_VIEWPORT(content)) content = gtk_viewport_get_child(GTK_VIEWPORT(content));
+      gtk_box_append(GTK_BOX(content), check);
+    }
     else adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), check);
-    g_object_set_data(G_OBJECT(dialog), "uninstall-report", check);
+    g_object_set_data(G_OBJECT(dialog), external ? "external-remember" : "uninstall-report", check);
   }
   if (chooser) populate_device_chooser(ADW_ALERT_DIALOG(dialog), message);
   struct Response { std::weak_ptr<Page> page; gint64 id; };
@@ -2582,6 +2606,8 @@ void Page::show_install_dialog(JsonObject* message) {
       const bool accept = choice == "accept" || choice == "once";
       auto* report = static_cast<GtkCheckButton*>(g_object_get_data(G_OBJECT(dialog), "uninstall-report"));
       if (accept && report && gtk_check_button_get_active(report)) choice = "report-abuse";
+      auto* remember = static_cast<GtkCheckButton*>(g_object_get_data(G_OBJECT(dialog), "external-remember"));
+      if (accept && remember && gtk_check_button_get_active(remember)) choice = "remember";
       if (accept && g_object_get_data(G_OBJECT(dialog), "chooser-list")) {
         choice = "devices:" + std::string(static_cast<const char*>(g_object_get_data(G_OBJECT(dialog), "chooser-revision"))) + ":";
         GList* selected = gtk_list_box_get_selected_rows(GTK_LIST_BOX(g_object_get_data(G_OBJECT(dialog), "chooser-list")));
