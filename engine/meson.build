@@ -62,6 +62,10 @@ compositor_lib = static_library('gnosis-compositor', ['brave/compositor.c', 'bra
   dependencies: compositor_deps, c_args: ['-Wno-declaration-after-statement'], pic: true)
 compositor_dep = declare_dependency(link_with: compositor_lib, dependencies: compositor_deps)
 if get_option('unit_tests').enabled()
+  edge_swipe_test = executable('edge-swipe-test', 'tests/edge-swipe-test.c',
+    include_directories: include_directories('brave'),
+    dependencies: meson.get_compiler('c').find_library('m'), c_args: ['-UNDEBUG'])
+  test('Touch edge navigation', edge_swipe_test)
   wayland_source_test = executable('wayland-source-test',
     ['brave/wayland-source.c', 'tests/wayland-source-test.c'],
     include_directories: include_directories('brave'),

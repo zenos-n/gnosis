@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5">
+<title>Gnosis native touch regression</title>
+<style>
+body { margin: 0; height: 5000px; background: linear-gradient(#eef,#8ac); font: 18px sans-serif; }
+button { position: fixed; left: 40px; top: 40px; width: 180px; height: 70px; }
+#contacts { position: fixed; left: 20px; right: 20px; top: 170px; height: 100px; background: #aca; touch-action: none; }
+p { padding: 300px 30px 0; }
+</style>
+<button id="tap">Touch target</button><div id="contacts">Multi-touch target (touch-action: none)</div>
+<p>Scroll or pinch here. The button and green strip stay fixed.</p>
+<script>
+window.stats = {clicks: 0, max: 0, starts: 0, moves: 0, ends: 0, cancels: 0, trusted: true, pointer: ''};
+tap.onclick = e => {stats.clicks++; stats.trusted &&= e.isTrusted;};
+document.addEventListener('pointerdown', e => {stats.pointer = e.pointerType; stats.trusted &&= e.isTrusted;});
+for (const [name,key] of [['touchstart','starts'],['touchmove','moves'],['touchend','ends'],['touchcancel','cancels']])
+  document.addEventListener(name, e => {stats[key]++; stats.max = Math.max(stats.max,e.touches.length); stats.trusted &&= e.isTrusted;}, {passive:true});
+</script>

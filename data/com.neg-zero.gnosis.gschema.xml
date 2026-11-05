@@ -270,7 +270,7 @@
 		<key type="b" name="enable-navigation-gestures">
 			<default>true</default>
 			<summary>Enable navigation gestures</summary>
-			<description>Whether to enable back and forward navigation gestures.</description>
+			<description>Whether one-finger swipes starting in the left or right 15% of a page navigate back or forward.</description>
 		</key>
 		<key type="s" name="last-upload-directory">
 			<default>''</default>

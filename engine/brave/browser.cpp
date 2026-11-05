@@ -43,6 +43,7 @@ std::string web_color_scheme() {
 }
 bool automation_mode = false;
 bool vim_mode = false;
+bool navigation_gestures = true;
 const std::string popup_layout = R"CSS(
 html { inline-size: max-content !important; block-size: max-content !important;
   min-inline-size: 0 !important; min-block-size: 0 !important;
@@ -1336,11 +1337,14 @@ void shutdown() {
 
 void update_preferences(const std::string& json) {
   const bool previous = vim_mode;
+  const bool previous_navigation = navigation_gestures;
   g_autoptr(JsonParser) parser = json_parser_new();
-  if (json_parser_load_from_data(parser, json.c_str(), json.size(), nullptr) && JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser)))
+  if (json_parser_load_from_data(parser, json.c_str(), json.size(), nullptr) && JSON_NODE_HOLDS_OBJECT(json_parser_get_root(parser))) {
     vim_mode = json_object_get_boolean_member_with_default(json_node_get_object(json_parser_get_root(parser)), "vimMode", false);
+    navigation_gestures = json_object_get_boolean_member_with_default(json_node_get_object(json_parser_get_root(parser)), "navigationGestures", true);
+  }
   native_preferences = json;
-  if (previous != vim_mode)
+  if (previous != vim_mode || previous_navigation != navigation_gestures)
     for (auto& [mode, process] : processes)
       for (auto& [token, weak] : process->pages) if (auto page = weak.lock()) page->update_preferences();
   for (auto& [mode, process] : processes) if (!process->closing) process->apply_preferences();
@@ -1431,6 +1435,7 @@ GtkWidget* Page::widget() const { return state_->content; }
 bool Page::is_closed() const { return state_->disposed; }
 void Page::set_extension_popup(bool enabled, int owner_tab_id) {
   state_->extension_popup = enabled; state_->popup_owner_tab_id = owner_tab_id;
+  if (state_->surface) gnosis_compositor_view_set_navigation_gestures(GNOSIS_COMPOSITOR_VIEW(state_->surface), navigation_gestures && !enabled);
 }
 void Page::start() {
   if (state_->started || state_->disposed) return;
@@ -1448,6 +1453,13 @@ void Page::start() {
 }
 void Page::adopt_surface(GtkWidget* widget) {
   state_->surface = widget;
+  gnosis_compositor_view_set_navigation_gestures(GNOSIS_COMPOSITOR_VIEW(widget), navigation_gestures && !state_->extension_popup);
+  g_signal_connect(widget, "touch-navigation", G_CALLBACK(+[](GtkWidget*, int direction, gpointer data) {
+    auto* page = static_cast<Page*>(data);
+    if (page->is_closed() || page->state_->extension_popup || !navigation_gestures) return;
+    if (direction < 0 && page->can_back) page->back();
+    else if (direction > 0 && page->can_forward) page->forward();
+  }), this);
   auto* focus = gtk_event_controller_focus_new();
   g_signal_connect(focus, "enter", G_CALLBACK(+[](GtkEventControllerFocus*, gpointer data) {
     static_cast<Page*>(data)->update_portal_parent();
@@ -3075,6 +3087,7 @@ void Page::update_vim(int context) {
     ",\"expression\":" + quote(expression) + "}", source->second);
 }
 void Page::update_preferences() {
+  if (state_->surface) gnosis_compositor_view_set_navigation_gestures(GNOSIS_COMPOSITOR_VIEW(state_->surface), navigation_gestures && !state_->extension_popup);
   update_web_theme();
   for (const auto& [context, frame] : state_->metadata_contexts) update_vim(context);
 }

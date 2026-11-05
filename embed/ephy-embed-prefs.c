@@ -563,6 +563,8 @@ ephy_embed_prefs_init (gpointer user_data)
                                 feature_overrides_get_mapping, NULL, NULL, NULL);
   g_settings_bind (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_ENABLE_VIM_MODE,
                    engine_settings, "enable-vim-mode", G_SETTINGS_BIND_GET);
+  g_settings_bind (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_ENABLE_NAVIGATION_GESTURES,
+                   engine_settings, "enable-navigation-gestures", G_SETTINGS_BIND_GET);
   g_settings_bind (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_ENABLE_ADBLOCK,
                    engine_settings, "enable-adblock", G_SETTINGS_BIND_GET);
   g_settings_bind (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_ENABLE_POPUPS,

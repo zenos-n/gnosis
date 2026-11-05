@@ -12,6 +12,7 @@ const char *gnosis_compositor_get_socket(GnosisCompositor *self);
 #define GNOSIS_TYPE_COMPOSITOR_VIEW (gnosis_compositor_view_get_type())
 G_DECLARE_FINAL_TYPE(GnosisCompositorView, gnosis_compositor_view, GNOSIS, COMPOSITOR_VIEW, GtkWidget)
 void gnosis_compositor_view_set_vim_field(GnosisCompositorView *self, gboolean enabled);
+void gnosis_compositor_view_set_navigation_gestures(GnosisCompositorView *self, gboolean enabled);
 GtkWidget *gnosis_compositor_view_new(GError **error);
 GtkWidget *gnosis_compositor_view_new_for_server(GnosisCompositor *server, const char *token);
 gboolean gnosis_compositor_view_has_surface(GnosisCompositorView *self);

@@ -20,6 +20,17 @@ they operate its actual GTK widgets and native browser backend. Use a disposable
 `--profile` and `GSETTINGS_BACKEND=memory`; never preload into a human profile.
 They are deliberately separate from the old CEF view tests.
 
+`native-touch-gtk-probe.cpp` needs a real GNOME/Mutter desktop. Compile it like
+the other C++ GTK probes, then run `native-touch-gtk-test.py --gnosis "$GNOSIS"
+--probe /tmp/gnosis-touch-probe.so`. The runner serves its local fixture, owns a
+temporary profile and process group, and bounds cleanup. The probe temporarily
+fullscreens only its own window and uses its own Mutter RemoteDesktop/ScreenCast
+session for actual touchscreen events; DevTools only observes fixture state.
+It checks trusted taps, six contacts, scrolling, pinch in/out, the 15% edge zones,
+back/forward, the live setting, vertical/multi-finger rejection, and unmap cleanup.
+It stops its input session before quitting. A physical touchscreen and touchpad
+pinch are not covered by this virtual-touchscreen check.
+
 `keepassxc-pairing-gtk-probe.cpp` is driven by
 `python3 engine/tools/check-keepassxc-pairing.py --browser "$GNOSIS" --probe "$PROBE"`.
 Compile it with the same preload flags and `-Iengine/brave`. The driver owns its

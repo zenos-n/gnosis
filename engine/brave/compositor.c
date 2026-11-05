@@ -7,6 +7,7 @@
 #include "outer-pointer.h"
 #include "clipboard-bridge.h"
 #include "wayland-source.h"
+#include "edge-swipe.h"
 #include <glib-unix.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -85,10 +86,11 @@ struct _GnosisCompositor {
   struct wl_listener request_cursor, request_cursor_shape;
   struct wlr_surface *cursor_surface;
   int cursor_hotspot_x, cursor_hotspot_y;
-  guint dispatch;
+  guint dispatch, touch_frame;
   char *directory, *socket;
   int drm_fd;
   gboolean keyboard_ready, shutting_down;
+  uint32_t next_touch_id;
 };
 struct _GnosisCompositorView {
   GtkWidget parent;
@@ -106,6 +108,9 @@ struct _GnosisCompositorView {
   double context_x, context_y;
   gint64 context_time;
   guint pressed_buttons;
+  GHashTable *touches;
+  GnosisEdgeSwipe edge_swipe;
+  gboolean navigation_gestures;
   gboolean captured, capture_inhibited, logged_gpu, logged_shm, vim_field;
 };
 G_DEFINE_TYPE(GnosisCompositor, gnosis_compositor, G_TYPE_OBJECT)
@@ -118,6 +123,7 @@ static void setup_drop_target(GnosisCompositorView *self);
 static void request_drag(struct wl_listener *listener, void *data);
 static GnosisCompositorView *pointer_host(GnosisCompositor *server);
 static void update_cursor(GnosisCompositor *server);
+static void cancel_touches(GnosisCompositorView *self);
 
 static void listen(struct wl_signal *signal, struct wl_listener *listener, wl_notify_func_t callback) {
   listener->notify = callback; wl_signal_add(signal, listener);
@@ -175,6 +181,7 @@ static void new_constraint(struct wl_listener *listener, void *data) {
 }
 static void focus_left(GtkEventControllerFocus *controller, GnosisCompositorView *self) {
   (void)controller;
+  cancel_touches(self);
   self->capture_inhibited = TRUE;
   stop_capture(self);
   if (self->server && self->server->seat && self->active &&
@@ -219,6 +226,7 @@ static void focus_entered(GtkEventControllerFocus *controller, GnosisCompositorV
     self->server->keyboard.keycodes, self->server->keyboard.num_keycodes, &self->server->keyboard.modifiers);
 }
 static void unmapped(GtkWidget *widget, GnosisCompositorView *self) {
+  cancel_touches(self);
   cancel_view_drag(self);
   gnosis_compositor_view_release_buttons(self);
   (void)widget; self->capture_inhibited = TRUE; stop_capture(self);
@@ -572,13 +580,14 @@ static void view_unmap(struct wl_listener *listener, void *data) {
   (void)data; View *view = wl_container_of(listener, view, unmap);
   restore_fullscreen(view);
   if (view->host) {
+    cancel_touches(view->host);
     stop_capture(view->host); gtk_widget_queue_draw(GTK_WIDGET(view->host));
   }
 }
 static void view_destroy(struct wl_listener *listener, void *data) {
   (void)data; View *v = wl_container_of(listener, v, destroy);
   restore_fullscreen(v); g_weak_ref_clear(&v->fullscreen_window);
-  if (v->host && v->host->active == v) { stop_capture(v->host); v->host->active = NULL; }
+  if (v->host && v->host->active == v) { cancel_touches(v->host); stop_capture(v->host); v->host->active = NULL; }
   wl_list_remove(&v->link); wl_list_remove(&v->commit.link); wl_list_remove(&v->map.link);
   wl_list_remove(&v->unmap.link); wl_list_remove(&v->destroy.link);
   wl_list_remove(&v->maximize.link); wl_list_remove(&v->fullscreen.link);
@@ -690,13 +699,12 @@ static void new_decoration(struct wl_listener *listener, void *data) {
   if (decoration->toplevel->base->initialized)
     wlr_xdg_toplevel_decoration_v1_set_mode(decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 }
+#include "touch-input.inc"
 static void motion(GtkEventControllerMotion *controller, double x, double y, GnosisCompositorView *self) {
   if (!self->active || self->captured) return;
   struct wlr_xdg_surface *xdg = self->active->toplevel->base;
-  int width = gtk_widget_get_width(GTK_WIDGET(self)), height = gtk_widget_get_height(GTK_WIDGET(self));
-  if (width && xdg->geometry.width > 0) x *= (double)xdg->geometry.width / width;
-  if (height && xdg->geometry.height > 0) y *= (double)xdg->geometry.height / height;
-  double sx, sy; struct wlr_surface *surface = wlr_xdg_surface_surface_at(xdg, x + xdg->geometry.x, y + xdg->geometry.y, &sx, &sy);
+  view_coordinates(self, &x, &y);
+  double sx, sy; struct wlr_surface *surface = wlr_xdg_surface_surface_at(xdg, x, y, &sx, &sy);
   if (!surface) { wlr_seat_pointer_notify_clear_focus(self->server->seat); return; }
   guint32 time = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller));
   wlr_seat_pointer_notify_enter(self->server->seat, surface, sx, sy);
@@ -821,6 +829,7 @@ static void server_dispose(GObject *object) {
   GnosisCompositor *self = GNOSIS_COMPOSITOR(object);
   if (self->display && !self->shutting_down) {
     self->shutting_down = TRUE;
+    if (self->touch_frame) { g_source_remove(self->touch_frame); self->touch_frame = 0; }
     gnosis_clipboard_bridge_free(self->clipboard); self->clipboard = NULL;
     if (self->dispatch) { g_source_remove(self->dispatch); self->dispatch = 0; }
     // These listeners belong to this server, not to the wlroots globals.
@@ -849,6 +858,7 @@ static void gnosis_compositor_init(GnosisCompositor *self) {
 }
 static void dispose(GObject *object) {
   GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(object);
+  cancel_touches(self);
   cancel_view_drag(self);
   g_clear_object(&self->pointer_device);
   stop_capture(self); gnosis_outer_pointer_free(self->outer_pointer); self->outer_pointer = NULL;
@@ -861,6 +871,7 @@ static void dispose(GObject *object) {
     g_clear_object(&self->server);
   }
   g_clear_pointer(&self->token, g_free);
+  g_clear_pointer(&self->touches, g_hash_table_unref);
   G_OBJECT_CLASS(gnosis_compositor_view_parent_class)->dispose(object);
 }
 static void gnosis_compositor_view_class_init(GnosisCompositorViewClass *klass) {
@@ -869,16 +880,22 @@ static void gnosis_compositor_view_class_init(GnosisCompositorViewClass *klass) 
   widget->snapshot = snapshot; widget->size_allocate = size_allocate;
   gtk_widget_class_set_css_name(widget, "gnosis-compositor-view");
   g_signal_new("surface-ready", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+  g_signal_new("touch-navigation", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_INT);
   g_signal_new("vim-command", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
   g_signal_new("fullscreen-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
   g_signal_new("drag-preview-image", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, GDK_TYPE_DRAG, G_TYPE_STRING);
 }
 static void gnosis_compositor_view_init(GnosisCompositorView *self) {
+  self->touches = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
   wl_list_init(&self->constraint_destroy.link);
   gtk_widget_set_focusable(GTK_WIDGET(self), TRUE); gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE);
   gtk_widget_set_vexpand(GTK_WIDGET(self), TRUE); gtk_widget_set_overflow(GTK_WIDGET(self), GTK_OVERFLOW_HIDDEN);
   setup_drop_target(self);
-  GtkEventController *controller = gtk_event_controller_motion_new();
+  GtkEventController *controller = gtk_event_controller_legacy_new();
+  gtk_event_controller_set_propagation_phase(controller, GTK_PHASE_CAPTURE);
+  g_signal_connect(controller, "event", G_CALLBACK(touch_event), self);
+  gtk_widget_add_controller(GTK_WIDGET(self), controller);
+  controller = gtk_event_controller_motion_new();
   g_signal_connect(controller, "motion", G_CALLBACK(motion), self); g_signal_connect(controller, "enter", G_CALLBACK(motion), self);
   g_signal_connect(controller, "leave", G_CALLBACK(leave), self); gtk_widget_add_controller(GTK_WIDGET(self), controller);
   GtkGesture *click = gtk_gesture_click_new(); gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
@@ -959,7 +976,7 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   xkb_keymap_unref(keymap); xkb_context_unref(context);
   wlr_keyboard_set_repeat_info(&self->keyboard, 25, 600);
   wlr_seat_set_keyboard(self->seat, &self->keyboard);
-  wlr_seat_set_capabilities(self->seat, WL_SEAT_CAPABILITY_KEYBOARD | WL_SEAT_CAPABILITY_POINTER);
+  wlr_seat_set_capabilities(self->seat, WL_SEAT_CAPABILITY_KEYBOARD | WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_TOUCH);
   self->directory = g_build_filename(g_get_user_runtime_dir(), "gnosis-wayland-XXXXXX", NULL);
   if (!g_mkdtemp(self->directory)) goto failed;
   self->socket = g_build_filename(self->directory, "wayland", NULL);
