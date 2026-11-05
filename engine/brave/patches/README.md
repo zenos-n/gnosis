@@ -63,6 +63,22 @@ session and both agents are disabled after the batch. Inspector-owned styles
 survive disabling and can be updated after reenabling, including under strict
 CSP. Out-of-process frames follow the same lifecycle.
 
+Touch history swipes use GTK page-under-page previews following WebKitGTK's
+`ViewGestureControllerGtk` interaction model. Native viewport captures are
+immutable GPU textures (long edge capped at1600px), held in a32MiB cache per
+browser profile, plus the active transition. Captures happen at navigation
+boundaries, not on frames or scrolling; same-document replacement does not
+continuously capture. Closing a tab and disabling gestures release its images.
+Private snapshots stay in their own browser profile's memory and never go to
+disk. The old Chromium overscroll arrow is disabled in the embedded browser.
+Source reference: https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/gtk/ViewGestureControllerGtk.cpp
+
+Smooth GTK scroll events retain their pixel units and finger source, including
+axis-stop events that let Chromium generate a native fling. The pinned Chromium
+155 Ozone backend otherwise scales raw Wayland deltas by120/10. Its upstream
+`WaylandUnscaledTouchpadScrolling:scroll_scaling_factor/1` feature keeps those
+already-scaled GTK deltas at1:1; discrete wheel/value120 behavior stays upstream.
+
 HTML dropdown defaults use `native-integration/select.css` through Chromium's
 USER-origin stylesheet API, once per committed HTTP/HTTPS/file frame. Author
 styles override these defaults, including named CSS layers, and strict CSP

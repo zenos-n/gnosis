@@ -108,9 +108,17 @@ struct _GnosisCompositorView {
   double context_x, context_y;
   gint64 context_time;
   guint pressed_buttons;
+  guint scroll_axes;
   GHashTable *touches;
   GnosisEdgeSwipe edge_swipe;
   gboolean navigation_gestures;
+  GdkTexture *swipe_source, *swipe_destination;
+  double swipe_progress, swipe_start_progress, swipe_end_progress;
+  gint64 swipe_started, swipe_duration, swipe_deadline;
+  gint64 swipe_ready_frame;
+  int swipe_direction;
+  guint swipe_animation;
+  gboolean swipe_loading, swipe_loaded;
   gboolean captured, capture_inhibited, logged_gpu, logged_shm, vim_field;
 };
 G_DEFINE_TYPE(GnosisCompositor, gnosis_compositor, G_TYPE_OBJECT)
@@ -124,6 +132,9 @@ static void request_drag(struct wl_listener *listener, void *data);
 static GnosisCompositorView *pointer_host(GnosisCompositor *server);
 static void update_cursor(GnosisCompositor *server);
 static void cancel_touches(GnosisCompositorView *self);
+static void cancel_swipe(GnosisCompositorView *self);
+static void update_swipe(GnosisCompositorView *self, double x);
+static void end_swipe(GnosisCompositorView *self, int direction);
 
 static void listen(struct wl_signal *signal, struct wl_listener *listener, wl_notify_func_t callback) {
   listener->notify = callback; wl_signal_add(signal, listener);
@@ -181,6 +192,7 @@ static void new_constraint(struct wl_listener *listener, void *data) {
 }
 static void focus_left(GtkEventControllerFocus *controller, GnosisCompositorView *self) {
   (void)controller;
+  cancel_swipe(self);
   cancel_touches(self);
   self->capture_inhibited = TRUE;
   stop_capture(self);
@@ -226,6 +238,7 @@ static void focus_entered(GtkEventControllerFocus *controller, GnosisCompositorV
     self->server->keyboard.keycodes, self->server->keyboard.num_keycodes, &self->server->keyboard.modifiers);
 }
 static void unmapped(GtkWidget *widget, GnosisCompositorView *self) {
+  cancel_swipe(self);
   cancel_touches(self);
   cancel_view_drag(self);
   gnosis_compositor_view_release_buttons(self);
@@ -315,7 +328,7 @@ static void snapshot_surface(struct wlr_surface *surface, int x, int y, void *da
     g_queue_push_tail(&s->host->presentations, pending);
   }
 }
-static void snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {
+static void snapshot_live(GtkWidget *widget, GtkSnapshot *snapshot) {
   GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(widget);
   if (!self->active || !self->active->toplevel->base->surface->mapped) return;
   Snapshot state = {self, snapshot};
@@ -326,6 +339,12 @@ static void snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {
                        (float)gtk_widget_get_height(widget) / geometry.height);
   wlr_xdg_surface_for_each_surface(self->active->toplevel->base, snapshot_surface, &state);
   gtk_snapshot_restore(snapshot);
+}
+#include "history-swipe.inc"
+static void snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {
+  GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(widget);
+  if (self->swipe_source) snapshot_swipe(self, snapshot);
+  else snapshot_live(widget, snapshot);
 }
 static void frame_surface(struct wlr_surface *surface, int x, int y, void *data) {
   (void)x; (void)y; wlr_surface_send_frame_done(surface, data);
@@ -751,11 +770,29 @@ static gboolean scroll(GtkEventControllerScroll *controller, double dx, double d
     return TRUE;
   }
   guint32 time = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller));
-  if (dy) wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_VERTICAL_SCROLL, dy * 15, dy * 120,
-    WL_POINTER_AXIS_SOURCE_WHEEL, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
-  if (dx) wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_HORIZONTAL_SCROLL, dx * 15, dx * 120,
-    WL_POINTER_AXIS_SOURCE_WHEEL, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+  gboolean finger = gtk_event_controller_scroll_get_unit(controller) == GDK_SCROLL_UNIT_SURFACE;
+  if (dy) {
+    wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_VERTICAL_SCROLL, finger ? dy : dy * 15, finger ? 0 : dy * 120,
+      finger ? WL_POINTER_AXIS_SOURCE_FINGER : WL_POINTER_AXIS_SOURCE_WHEEL, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+    if (finger) self->scroll_axes |= 1;
+  }
+  if (dx) {
+    wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_HORIZONTAL_SCROLL, finger ? dx : dx * 15, finger ? 0 : dx * 120,
+      finger ? WL_POINTER_AXIS_SOURCE_FINGER : WL_POINTER_AXIS_SOURCE_WHEEL, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+    if (finger) self->scroll_axes |= 2;
+  }
   wlr_seat_pointer_notify_frame(self->server->seat); return TRUE;
+}
+static void scroll_end(GtkEventControllerScroll *controller, GnosisCompositorView *self) {
+  if (!self->server || !self->server->seat) return;
+  if (pointer_host(self->server) != self) { self->scroll_axes = 0; return; }
+  guint32 time = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller));
+  if (self->scroll_axes & 1) wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_VERTICAL_SCROLL, 0, 0,
+    WL_POINTER_AXIS_SOURCE_FINGER, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+  if (self->scroll_axes & 2) wlr_seat_pointer_notify_axis(self->server->seat, time, WL_POINTER_AXIS_HORIZONTAL_SCROLL, 0, 0,
+    WL_POINTER_AXIS_SOURCE_FINGER, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+  if (self->scroll_axes) wlr_seat_pointer_notify_frame(self->server->seat);
+  self->scroll_axes = 0;
 }
 void gnosis_compositor_view_release_buttons(GnosisCompositorView *self) {
   if (self->server && self->server->export_drag) return;
@@ -858,6 +895,7 @@ static void gnosis_compositor_init(GnosisCompositor *self) {
 }
 static void dispose(GObject *object) {
   GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(object);
+  cancel_swipe(self);
   cancel_touches(self);
   cancel_view_drag(self);
   g_clear_object(&self->pointer_device);
@@ -881,6 +919,7 @@ static void gnosis_compositor_view_class_init(GnosisCompositorViewClass *klass) 
   gtk_widget_class_set_css_name(widget, "gnosis-compositor-view");
   g_signal_new("surface-ready", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   g_signal_new("touch-navigation", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_INT);
+  g_signal_new("touch-swipe-begin", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, NULL, NULL, G_TYPE_BOOLEAN, 1, G_TYPE_INT);
   g_signal_new("vim-command", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
   g_signal_new("fullscreen-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
   g_signal_new("drag-preview-image", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, GDK_TYPE_DRAG, G_TYPE_STRING);
@@ -903,6 +942,7 @@ static void gnosis_compositor_view_init(GnosisCompositorView *self) {
   g_signal_connect_swapped(click,"cancel",G_CALLBACK(gnosis_compositor_view_release_buttons),self);
   gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
   controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+  g_signal_connect(controller, "scroll-end", G_CALLBACK(scroll_end), self);
   g_signal_connect(controller, "scroll", G_CALLBACK(scroll), self); gtk_widget_add_controller(GTK_WIDGET(self), controller);
   controller = gtk_event_controller_key_new(); gtk_event_controller_set_propagation_phase(controller, GTK_PHASE_BUBBLE);
   g_signal_connect(controller, "key-pressed", G_CALLBACK(key_pressed), self); g_signal_connect(controller, "key-released", G_CALLBACK(key_released), self);

@@ -34,6 +34,7 @@ static guint touch_count(GnosisCompositor *server) {
 }
 
 static void cancel_touches(GnosisCompositorView *self) {
+  cancel_swipe(self);
   if (!self->touches || !g_hash_table_size(self->touches)) return;
   if (self->server && self->server->seat) {
     GHashTableIter iter; gpointer value;
@@ -61,6 +62,7 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
   if (type != GDK_TOUCH_BEGIN && type != GDK_TOUCH_UPDATE && type != GDK_TOUCH_END && type != GDK_TOUCH_CANCEL) return FALSE;
   if (!self->server || !self->active) return TRUE;
   if (type == GDK_TOUCH_CANCEL) { cancel_touches(self); return TRUE; }
+  if (self->swipe_loading) return TRUE;
   GdkEventSequence *sequence = gdk_event_get_event_sequence(event);
   double x, y, tx, ty;
   GtkNative *native = gtk_native_get_for_surface(gdk_event_get_surface(event));
@@ -76,6 +78,7 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
   guint32 time = gdk_event_get_time(event);
   TouchPoint *touch = g_hash_table_lookup(self->touches, sequence);
   if (type == GDK_TOUCH_BEGIN) {
+    if (!g_hash_table_size(self->touches)) cancel_swipe(self);
     if (touch) { cancel_touches(self); return TRUE; }
     double px, py;
     struct wlr_surface *surface = wlr_xdg_surface_surface_at(self->active->toplevel->base, sx, sy, &px, &py);
@@ -91,6 +94,7 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
       for (guint i = 0; i < self->server->hosts->len; i++) {
         GnosisCompositorView *host = g_ptr_array_index(self->server->hosts, i);
         host->edge_swipe.eligible = false;
+        if (host->swipe_source) end_swipe(host, 0);
       }
     }
     /* Once an edge swipe owns the gesture, extra fingers cancel navigation and
@@ -106,10 +110,17 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
     }
     if (type == GDK_TOUCH_UPDATE) {
       if (point && self->edge_swipe.eligible && gnosis_edge_swipe_move(&self->edge_swipe, x, y)) {
-        wlr_seat_touch_notify_cancel(seat, point->client);
+        gboolean accepted = FALSE;
+        g_signal_emit_by_name(self, "touch-swipe-begin", self->edge_swipe.direction, &accepted);
+        if (accepted) wlr_seat_touch_notify_cancel(seat, point->client);
+        else {
+          self->edge_swipe.owned = self->edge_swipe.eligible = false;
+          wlr_seat_touch_notify_motion(seat, time, touch->id, sx + touch->offset_x, sy + touch->offset_y);
+        }
       } else if (point && point->surface) {
         wlr_seat_touch_notify_motion(seat, time, touch->id, sx + touch->offset_x, sy + touch->offset_y);
       }
+      if (self->edge_swipe.eligible && self->edge_swipe.owned) update_swipe(self, x);
     } else if (type == GDK_TOUCH_END) {
       int direction = self->navigation_gestures ? gnosis_edge_swipe_finish(&self->edge_swipe, x, y) : 0;
       if (point) wlr_seat_touch_notify_up(seat, time, touch->id);
@@ -117,7 +128,7 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
       if (!g_hash_table_size(self->touches)) self->edge_swipe = (GnosisEdgeSwipe){0};
       wlr_seat_touch_notify_frame(seat);
       wl_display_flush_clients(self->server->display);
-      if (direction) g_signal_emit_by_name(self, "touch-navigation", direction);
+      if (!g_hash_table_size(self->touches)) end_swipe(self, direction);
       return TRUE;
     }
   }
@@ -127,5 +138,5 @@ static gboolean touch_event(GtkEventControllerLegacy *controller, GdkEvent *even
 
 void gnosis_compositor_view_set_navigation_gestures(GnosisCompositorView *self, gboolean enabled) {
   self->navigation_gestures = enabled;
-  if (!enabled) self->edge_swipe.eligible = false;
+  if (!enabled) { self->edge_swipe.eligible = false; cancel_swipe(self); }
 }

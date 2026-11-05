@@ -100,7 +100,8 @@ private:
   void attach(); void handle(const std::string&, JsonObject*, bool frame_event = false); void layout();
   void adopt_surface(GtkWidget*); void surface_ready();
   void update_portal_parent();
-  void history(int); void refresh_history();
+  void history(int); void refresh_history(bool same_document = false);
+  void remember_navigation_preview();
   void internal_request(JsonObject*);
   void show_context_menu(JsonObject*, int context);
   void dismiss_context_menu();

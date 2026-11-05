@@ -139,6 +139,13 @@ struct AuthenticatorUI {
   gulong closed = 0;
   std::vector<GtkWidget*> actions;
 };
+struct NavigationPreview {
+  GdkTexture *texture = nullptr;
+  std::string owner;
+  int entry = -1;
+  size_t bytes = 0;
+  ~NavigationPreview() { g_clear_object(&texture); }
+};
 struct Page::State {
   GtkWidget* content;
   GtkEventController* keys = nullptr;
@@ -149,6 +156,9 @@ struct Page::State {
   std::string authorized_document, fulfilled_document, committed_document;
   std::map<std::string, std::string> internal_loaders;
   guint64 navigation_generation = 0;
+  int history_current = -1, history_back = -1, history_forward = -1;
+  bool history_traversal = false;
+  std::map<int, std::weak_ptr<NavigationPreview>> navigation_previews;
   guint64 find_generation = 0;
   guint64 close_generation = 0, close_navigation = 0;
   gint64 close_request = 0;
@@ -230,6 +240,8 @@ public:
   std::map<gint64, NativeReply> native_replies;
   bool closing = false, ready = false, launched = false, restarting = false;
   bool browser_waiting = false;
+  std::deque<std::shared_ptr<NavigationPreview>> navigation_previews;
+  size_t navigation_preview_bytes = 0;
   unsigned profile_writers = 0;
   std::shared_ptr<PrivateProfile> private_storage;
   bool integration_ready = false, integration_connecting = false;
@@ -441,6 +453,7 @@ public:
         s.requested = page->uri;
         s.attached = s.protocol_ready = s.native_destroyed = false;
         s.window = s.native_tab = -1; s.child = 0;
+        s.history_current = s.history_back = s.history_forward = -1; s.history_traversal = false; s.navigation_previews.clear();
         page->set_vim_context(0); s.main_frame.clear(); s.context_id = 0; s.context_unique.clear(); s.menu_contexts.clear(); s.menu_frames.clear(); s.menu_sessions.clear(); s.metadata_contexts.clear(); s.metadata_unique.clear();
         s.zoom_busy = false; s.zoom_pending = true; ++s.zoom_revision;
         s.process = replacement;
@@ -507,12 +520,13 @@ public:
       // switches when supplying the combined feature list.
       // CustomScrollbar's class-local overlay patch also needs the native
       // overlay theme so visibility, hit testing and fade timers agree.
-      std::string("--enable-features=FileSystemAccessAPI,BraveWebBluetoothAPI,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder,OverlayScrollbar:mode/overlay") + (composited() ? ",WaylandExternalBeginFrameSource" : ""),
+      std::string("--enable-features=FileSystemAccessAPI,BraveWebBluetoothAPI,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder,OverlayScrollbar:mode/overlay") + (composited() ? ",WaylandExternalBeginFrameSource,WaylandUnscaledTouchpadScrolling:scroll_scaling_factor/1" : ""),
       "--enable-blink-features=WebBluetooth,MiddleClickAutoscroll",
       // The pinned Brave's GTK4 startup calls a missing toolkit entry point.
       "--gtk-version=3",
       "--password-store=basic", "--window-size=1000,700", "--window-position=-16000,-16000"};
     if (!automation_mode) args.push_back("--disable-blink-features=AutomationControlled");
+    if (composited()) args.push_back("--overscroll-history-navigation=0");
     // Consume the nested compositor's actual frame callbacks with upstream
     // in-flight backpressure. Uncapped rendering is only a diagnostic override.
     if (composited() && g_strcmp0(g_getenv("GNOSIS_UNCAP_FRAMES"), "1") == 0)
@@ -1344,6 +1358,10 @@ void update_preferences(const std::string& json) {
     navigation_gestures = json_object_get_boolean_member_with_default(json_node_get_object(json_parser_get_root(parser)), "navigationGestures", true);
   }
   native_preferences = json;
+  if (previous_navigation && !navigation_gestures)
+    for (auto& [mode, process] : processes) {
+      process->navigation_previews.clear(); process->navigation_preview_bytes = 0;
+    }
   if (previous != vim_mode || previous_navigation != navigation_gestures)
     for (auto& [mode, process] : processes)
       for (auto& [token, weak] : process->pages) if (auto page = weak.lock()) page->update_preferences();
@@ -1459,6 +1477,16 @@ void Page::adopt_surface(GtkWidget* widget) {
     if (page->is_closed() || page->state_->extension_popup || !navigation_gestures) return;
     if (direction < 0 && page->can_back) page->back();
     else if (direction > 0 && page->can_forward) page->forward();
+  }), this);
+  g_signal_connect(widget, "touch-swipe-begin", G_CALLBACK(+[](GtkWidget* widget, int direction, gpointer data) -> gboolean {
+    auto* page = static_cast<Page*>(data);
+    if (page->is_closed() || page->state_->extension_popup || !navigation_gestures ||
+        (direction < 0 ? !page->can_back : !page->can_forward)) return FALSE;
+    int entry = direction < 0 ? page->state_->history_back : page->state_->history_forward;
+    auto found = page->state_->navigation_previews.find(entry);
+    auto image = found == page->state_->navigation_previews.end() ? nullptr : found->second.lock();
+    gnosis_compositor_view_begin_swipe(GNOSIS_COMPOSITOR_VIEW(widget), direction, image ? image->texture : nullptr);
+    return TRUE;
   }), this);
   auto* focus = gtk_event_controller_focus_new();
   g_signal_connect(focus, "enter", G_CALLBACK(+[](GtkEventControllerFocus*, gpointer data) {
@@ -1795,6 +1823,7 @@ void Page::offer_http_retry(const std::string& address) {
     }, new Retry{weak_from_this(), "http://" + address.substr(8), state_->navigation_generation});
 }
 void Page::navigate(const std::string& value) {
+  remember_navigation_preview();
   dismiss_http_retry();
   dismiss_passkey_provider();
   dismiss_authenticator(true);
@@ -1868,20 +1897,58 @@ bool Page::send_page_message(const std::string& expected, const std::string& nam
     quote("globalThis.__gnosisDispatch?.(" + quote(name) + "," + rewrite_resources(json, state_->internal_origin) + ")") + "}");
   return true;
 }
-void Page::refresh_history() {
+void Page::remember_navigation_preview() {
+  auto& s = *state_;
+  if (!navigation_gestures || is_closed() || s.extension_popup || !s.surface || !s.process ||
+      s.history_current < 0 || s.process->closing) return;
+  auto* texture = gnosis_compositor_view_capture(GNOSIS_COMPOSITOR_VIEW(s.surface));
+  if (!texture) return;
+  auto& process = *s.process;
+  for (auto it = process.navigation_previews.begin(); it != process.navigation_previews.end();) {
+    if ((*it)->owner == s.token && (*it)->entry == s.history_current) {
+      process.navigation_preview_bytes -= (*it)->bytes; it = process.navigation_previews.erase(it);
+    } else ++it;
+  }
+  auto image = std::make_shared<NavigationPreview>();
+  image->texture = texture; image->owner = s.token; image->entry = s.history_current;
+  image->bytes = size_t(gdk_texture_get_width(texture)) * gdk_texture_get_height(texture) * 4;
+  process.navigation_previews.push_back(image); process.navigation_preview_bytes += image->bytes;
+  s.navigation_previews[s.history_current] = image;
+  // One bounded cache per native browser profile; private images never reach disk.
+  while (process.navigation_preview_bytes > 32 * 1024 * 1024 && !process.navigation_previews.empty()) {
+    process.navigation_preview_bytes -= process.navigation_previews.front()->bytes;
+    process.navigation_previews.pop_front();
+  }
+  for (auto it = s.navigation_previews.begin(); it != s.navigation_previews.end();)
+    if (it->second.expired()) it = s.navigation_previews.erase(it); else ++it;
+}
+void Page::refresh_history(bool same_document) {
   auto weak = weak_from_this();
-  command("Page.getNavigationHistory", "{}", [weak](JsonObject* result, const std::string&) {
-    auto self = weak.lock(); if (!self || !result) return;
+  command("Page.getNavigationHistory", "{}", [weak, same_document](JsonObject* result, const std::string&) {
+    auto self = weak.lock(); if (!self || self->is_closed() || !result) return;
     auto* entries = json_object_get_array_member(result, "entries"); int index = json_object_get_int_member(result, "currentIndex");
+    auto entry_id = [&](int i) {
+      return entries && i >= 0 && i < int(json_array_get_length(entries))
+        ? int(json_object_get_int_member(json_array_get_object_element(entries, i), "id")) : -1;
+    };
+    // replaceState may run every frame. Capture only actual new history entries.
+    if (same_document && entry_id(index) != self->state_->history_current && !self->state_->history_traversal)
+      self->remember_navigation_preview();
+    self->state_->history_current = entry_id(index);
+    self->state_->history_traversal = false;
+    self->state_->history_back = entry_id(index - 1);
+    self->state_->history_forward = entry_id(index + 1);
     self->can_back = index > 0; self->can_forward = entries && index + 1 < int(json_array_get_length(entries));
     if (self->changed) self->changed();
   });
 }
 void Page::history(int delta) {
+  remember_navigation_preview();
   auto weak = weak_from_this(); command("Page.getNavigationHistory", "{}", [weak, delta](JsonObject* result, const std::string&) {
     auto self = weak.lock(); if (!self || !result) return;
     auto* entries = json_object_get_array_member(result, "entries"); int index = json_object_get_int_member(result, "currentIndex") + delta;
     if (entries && index >= 0 && index < int(json_array_get_length(entries))) {
+      self->state_->history_traversal = true;
       auto* item = json_array_get_object_element(entries, index);
       self->command("Page.navigateToHistoryEntry", "{\"entryId\":" + std::to_string(json_object_get_int_member(item, "id")) + "}");
     }
@@ -2097,6 +2164,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
     offer_http_retry(state_->document_request_url);
   } else if (method == "Page.frameStartedLoading" && state_->attached &&
              std::string(text(params, "frameId")) == state_->main_frame) {
+    if (!loading) remember_navigation_preview();
     loading = true; progress = 0.1; state_->response_status = 0;
     if (changed) changed();
   } else if (method == "Page.frameNavigated") {
@@ -2127,10 +2195,10 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
         if (!state_->committed_document.empty()) state_->authorized_document.clear();
         if (navigation_started) navigation_started(uri);
         if (changed) changed();
+        refresh_history();
         // A cached history commit can arrive after frameStoppedLoading. Do
         // not restart its spinner, and finish the newly created shell resource.
         if (!loading) {
-          refresh_history();
           if (load_finished) load_finished(state_->response_status);
         }
         state_->zoom_pending = true; apply_zoom();
@@ -2143,7 +2211,8 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
     if (response) state_->response_status = json_object_get_int_member(response, "status");
   } else if (method == "Page.navigatedWithinDocument" && state_->attached &&
              std::string(text(params, "frameId")) == state_->main_frame) {
-    uri = canonical_uri(text(params, "url")); refresh_history(); if (changed) changed();
+    uri = canonical_uri(text(params, "url")); refresh_history(true); if (changed) changed();
+    if (state_->surface) gnosis_compositor_view_swipe_ready(GNOSIS_COMPOSITOR_VIEW(state_->surface));
     request_favicon();
   } else if (method == "Page.frameStoppedLoading" && state_->attached &&
              std::string(text(params, "frameId")) == state_->main_frame) {
@@ -2152,6 +2221,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
     // loading lifetime instead; child frames must not finish the main page.
     bool was_loading = loading;
     loading = false; progress = 1; refresh_history(); if (changed) changed();
+    if (state_->surface) gnosis_compositor_view_swipe_ready(GNOSIS_COMPOSITOR_VIEW(state_->surface));
     if (was_loading && load_finished) load_finished(state_->response_status);
     request_favicon();
     apply_zoom();
@@ -3542,6 +3612,14 @@ void Page::close() {
   });
   if (!state_ || state_->disposed) return;
   auto& s = *state_;
+  if (s.process) {
+    for (auto it = s.process->navigation_previews.begin(); it != s.process->navigation_previews.end();) {
+      if ((*it)->owner == s.token) {
+        s.process->navigation_preview_bytes -= (*it)->bytes; it = s.process->navigation_previews.erase(it);
+      } else ++it;
+    }
+  }
+  s.navigation_previews.clear();
   dismiss_script_dialog(true);
   dismiss_authenticator(true);
   dismiss_install_dialog(true);

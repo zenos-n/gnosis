@@ -26,10 +26,15 @@ the other C++ GTK probes, then run `native-touch-gtk-test.py --gnosis "$GNOSIS"
 temporary profile and process group, and bounds cleanup. The probe temporarily
 fullscreens only its own window and uses its own Mutter RemoteDesktop/ScreenCast
 session for actual touchscreen events; DevTools only observes fixture state.
-It checks trusted taps, six contacts, scrolling, pinch in/out, the 15% edge zones,
+It uses the HDMI monitor without changing display configuration. It checks
+trusted taps, six contacts, scrolling and post-release momentum, pinch in/out, the 15% edge zones,
 back/forward, the live setting, vertical/multi-finger rejection, and unmap cleanup.
-It stops its input session before quitting. A physical touchscreen and touchpad
-pinch are not covered by this virtual-touchscreen check.
+It stops its input session before quitting. `--preview` checks actual destination
+pixels during back/forward drags, returning a cancelled swipe, and completed
+navigation; captures are `/tmp/gnosis-swipe-*.png`. `--trackpad` uses real smooth
+pointer-axis events and a finger-source stop to check pixel scaling and momentum.
+A physical touchscreen/trackpad and touchpad pinch are not covered by these
+virtual-device checks.
 
 `keepassxc-pairing-gtk-probe.cpp` is driven by
 `python3 engine/tools/check-keepassxc-pairing.py --browser "$GNOSIS" --probe "$PROBE"`.

@@ -16,6 +16,7 @@ static GDBusConnection *bus;
 static std::string remote, stream;
 static double width, height;
 static bool busy;
+static bool monitor_selected;
 static gint64 started, next_at;
 static size_t step;
 static std::vector<std::pair<int,std::function<void()>>> actions;
@@ -94,6 +95,74 @@ static void swipe(double x,double y,double dx,double dy) {
   for(int i=1;i<=15;i++)add(25,[=]{touch("Motion",0,x+dx*i/15,y+dy*i/15);});
   add(500,[]{touch("Up",0);});
 }
+static void capture_preview(const char *name,bool left_red,bool right_red) {
+  auto *paintable=gtk_widget_paintable_new(host);auto *snapshot=gtk_snapshot_new();
+  gdk_paintable_snapshot(paintable,GDK_SNAPSHOT(snapshot),width,height);
+  auto *node=gtk_snapshot_free_to_node(snapshot);if(!node)fail("empty preview");
+  auto *texture=gsk_renderer_render_texture(gtk_native_get_renderer(gtk_widget_get_native(host)),node,nullptr);
+  std::string path=std::string("/tmp/gnosis-swipe-")+name+".png";
+  gdk_texture_save_to_png(texture,path.c_str());
+  auto *downloader=gdk_texture_downloader_new(texture);
+  gdk_texture_downloader_set_format(downloader,GDK_MEMORY_R8G8B8A8_PREMULTIPLIED);
+  gsize stride=0;auto *bytes=gdk_texture_downloader_download_bytes(downloader,&stride);
+  auto *pixels=static_cast<const guchar*>(g_bytes_get_data(bytes,nullptr));
+  auto color=[&](double x,bool red){auto *p=pixels+int(height*.7)*stride+int(width*x)*4;
+    g_print("SWIPE_PIXEL %s x=%.2f rgb=%u,%u,%u\n",name,x,p[0],p[1],p[2]);
+    return red ? p[0]>180&&p[2]<80 : p[2]>180&&p[0]<80;};
+  bool valid=color(.1,left_red)&&color(.85,right_red);
+  g_bytes_unref(bytes);gdk_texture_downloader_free(downloader);g_object_unref(texture);
+  gsk_render_node_unref(node);g_object_unref(paintable);
+  if(!valid)fail("swipe did not display the destination/current page colors");
+}
+static void prepare_preview_actions() {
+  const std::string url=page->uri;
+  add(1000,initialize_input);
+  add(300,[]{touch("Down",0,width*.5,height*.7);});add(500,[]{touch("Up",0);});
+  add(800,[url]{page->navigate(url+"?color=red");});
+  add(50,[]{evaluate("new URL(location.href).searchParams.get('color')==='red'");});
+  add(800,[url]{page->navigate(url+"?color=blue");});
+  add(50,[]{evaluate("new URL(location.href).searchParams.get('color')==='blue'");});
+  add(40,[]{touch("Down",0,width*.05,height*.7);});
+  for(int i=1;i<=15;i++)add(20,[i]{touch("Motion",0,width*(.05+.35*i/15),height*.7);});
+  add(50,[]{capture_preview("back-drag",true,false);});
+  add(50,[]{touch("Motion",0,width*.05+20,height*.7);});
+  add(600,[]{touch("Up",0);});
+  add(50,[]{evaluate("new URL(location.href).searchParams.get('color')==='blue'");capture_preview("cancelled",false,false);});
+  swipe(width*.05,height*.7,width*.35,0);
+  add(50,[]{evaluate("new URL(location.href).searchParams.get('color')==='red'");capture_preview("back-complete",true,true);});
+  add(40,[]{touch("Down",0,width*.95,height*.7);});
+  for(int i=1;i<=15;i++)add(20,[i]{touch("Motion",0,width*(.95-.35*i/15),height*.7);});
+  add(50,[]{capture_preview("forward-drag",true,false);});
+  add(600,[]{touch("Up",0);});
+  add(50,[]{evaluate("new URL(location.href).searchParams.get('color')==='blue'");capture_preview("forward-complete",false,false);});
+  add(0,[]{stop_input();page.reset();g_print("NATIVE_SWIPE_PREVIEW_PASS actual destination pixels, cancelled drag, back/forward navigation\nNATIVE_TOUCH_PASS\n");g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()),"quit",nullptr);});
+}
+static void prepare_trackpad_actions() {
+  auto *events=gtk_event_controller_legacy_new();
+  gtk_event_controller_set_propagation_phase(events,GTK_PHASE_CAPTURE);
+  g_signal_connect(events,"event",G_CALLBACK((+[](GtkEventControllerLegacy*,GdkEvent *event,gpointer)->gboolean{
+    if(gdk_event_get_event_type(event)==GDK_SCROLL) {
+      double dx,dy;gdk_scroll_event_get_deltas(event,&dx,&dy);
+      g_print("SCROLL_GDK unit=%d dx=%.2f dy=%.2f stop=%d\n",gdk_scroll_event_get_unit(event),dx,dy,gdk_scroll_event_is_stop(event));
+    }
+    return FALSE;
+  })),nullptr);
+  gtk_widget_add_controller(GTK_WIDGET(window),events);
+  add(1000,initialize_input);
+  add(500,[]{
+    graphene_rect_t bounds;if(!gtk_widget_compute_bounds(host,GTK_WIDGET(window),&bounds))fail("pointer bounds");
+    g_variant_unref(call("org.gnome.Mutter.RemoteDesktop",remote,"org.gnome.Mutter.RemoteDesktop.Session","NotifyPointerMotionAbsolute",
+      g_variant_new("(sdd)",stream.c_str(),bounds.origin.x+width*.5,bounds.origin.y+height*.7)));
+  });
+  add(100,[]{evaluate("scrollTo(0,0),true");});
+  for(int i=0;i<15;i++)add(20,[]{g_variant_unref(call("org.gnome.Mutter.RemoteDesktop",remote,
+    "org.gnome.Mutter.RemoteDesktop.Session","NotifyPointerAxis",g_variant_new("(ddu)",0.,20.,0u)));});
+  add(20,[]{g_variant_unref(call("org.gnome.Mutter.RemoteDesktop",remote,
+    "org.gnome.Mutter.RemoteDesktop.Session","NotifyPointerAxis",g_variant_new("(ddu)",0.,0.,5u)));});
+  add(250,[]{evaluate("globalThis.releaseScrollY=scrollY,true");});
+  add(50,[]{evaluate("releaseScrollY>100&&releaseScrollY<1000&&scrollY>releaseScrollY+20");});
+  add(0,[]{stop_input();page.reset();g_print("NATIVE_TRACKPAD_PASS surface deltas, axis stop and momentum\nNATIVE_TOUCH_PASS\n");g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()),"quit",nullptr);});
+}
 static void prepare_actions() {
   add(1000,initialize_input);
   // Mutter may advertise its virtual touchscreen only after the first contact.
@@ -105,7 +174,11 @@ static void prepare_actions() {
   add(100,[]{for(unsigned i=0;i<6;i++)touch("Motion",i,width*.4+i*12+8,220);});
   add(300,[]{for(unsigned i=0;i<6;i++)touch("Up",i);});
   add(50,[]{evaluate("stats.max===6&&stats.moves>0&&stats.ends>=7&&stats.trusted");});
-  swipe(width*.5,height*.8,0,-250);
+  add(35,[]{touch("Down",0,width*.5,height*.8);});
+  for(int i=1;i<=15;i++)add(20,[i]{touch("Motion",0,width*.5,height*.8-250.*i/15);});
+  add(20,[]{touch("Up",0);});
+  add(250,[]{evaluate("globalThis.releaseScrollY=scrollY,true");});
+  add(50,[]{evaluate("scrollY>releaseScrollY+30");});
   add(50,[]{evaluate("scrollY>80");});
   add(300,[]{evaluate("scrollTo(0,0),true");});
   add(80,[]{touch("Down",0,width*.5-60,height*.6);touch("Down",1,width*.5+60,height*.6);});
@@ -161,9 +234,23 @@ static gboolean start(gpointer) {
   if(!embed||!getview||!getpage||!embed(window))return G_SOURCE_CONTINUE;
   auto *view=getview(embed(window));host=find(view);page=getpage(view);
   if(!host||!page||page->loading||page->uri.find("native-touch.html")==std::string::npos)return G_SOURCE_CONTINUE;
-  if(!gtk_window_is_fullscreen(window)){gtk_window_fullscreen(window);return G_SOURCE_CONTINUE;}
+  if(!monitor_selected) {
+    auto *monitors=gdk_display_get_monitors(gdk_display_get_default());
+    for(guint i=0;i<g_list_model_get_n_items(monitors);i++) {
+      auto *monitor=GDK_MONITOR(g_list_model_get_item(monitors,i));
+      const char *name=gdk_monitor_get_connector(monitor);
+      if(name&&strstr(name,"HDMI")){gtk_window_fullscreen_on_monitor(window,monitor);monitor_selected=true;}
+      g_object_unref(monitor);if(monitor_selected)return G_SOURCE_CONTINUE;
+    }
+    fail("HDMI test monitor not available");
+  }
+  if(!gtk_window_is_fullscreen(window))return G_SOURCE_CONTINUE;
   width=gtk_widget_get_width(host);height=gtk_widget_get_height(host);
   if(width<600||height<500)return G_SOURCE_CONTINUE;
-  started=g_get_monotonic_time();next_at=started+1000000;prepare_actions();g_timeout_add(15,tick,nullptr);return G_SOURCE_REMOVE;
+  started=g_get_monotonic_time();next_at=started+1000000;
+  if(g_getenv("GNOSIS_TOUCH_PREVIEW_TEST"))prepare_preview_actions();
+  else if(g_getenv("GNOSIS_TRACKPAD_TEST"))prepare_trackpad_actions();
+  else prepare_actions();
+  g_timeout_add(15,tick,nullptr);return G_SOURCE_REMOVE;
 }
 __attribute__((constructor))static void setup(){char exe[2048];auto n=readlink("/proc/self/exe",exe,sizeof(exe)-1);if(n<0)return;exe[n]=0;if(strstr(exe,"/.gnosis-wrapped"))g_timeout_add_seconds(2,start,nullptr);}

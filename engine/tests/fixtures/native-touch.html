@@ -11,6 +11,8 @@ p { padding: 300px 30px 0; }
 <p>Scroll or pinch here. The button and green strip stay fixed.</p>
 <script>
 window.stats = {clicks: 0, max: 0, starts: 0, moves: 0, ends: 0, cancels: 0, trusted: true, pointer: ''};
+const color = new URL(location.href).searchParams.get('color');
+if (color === 'red' || color === 'blue') document.body.style.background = color;
 tap.onclick = e => {stats.clicks++; stats.trusted &&= e.isTrusted;};
 document.addEventListener('pointerdown', e => {stats.pointer = e.pointerType; stats.trusted &&= e.isTrusted;});
 for (const [name,key] of [['touchstart','starts'],['touchmove','moves'],['touchend','ends'],['touchcancel','cancels']])
