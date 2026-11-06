@@ -10,7 +10,7 @@
 
 struct _EphyWebAppDialog {
   AdwPreferencesDialog parent_instance;
-  GtkWidget *name, *url, *preview, *error, *save;
+  GtkWidget *name, *url, *preview, *error, *save, *open_links, *domains;
   GIcon *icon, *site_icon;
   GKeyFile *config;
   GPtrArray *extensions;
@@ -177,6 +177,12 @@ static void accept_setup (GtkButton *button, EphyWebAppDialog *self) {
     gtk_label_set_text (GTK_LABEL (self->error), _("Enter a name and an HTTP or HTTPS address.")); return;
   }
   if (!bytes) { gtk_label_set_text (GTK_LABEL (self->error), error->message); return; }
+  {
+    g_autoptr (GKeyFile) config = ephy_web_app_dialog_dup_config (self);
+    if (!gnosis_web_app_config_validate (config, &error)) {
+      gtk_label_set_text (GTK_LABEL (self->error), error->message); return;
+    }
+  }
   g_object_set_data_full (G_OBJECT (self), "validated-icon", g_bytes_ref (bytes), (GDestroyNotify)g_bytes_unref);
   g_signal_emit_by_name (self, "accepted");
 }
@@ -227,6 +233,7 @@ GtkWidget *ephy_web_app_dialog_new (const char *name, const char *url, GIcon *ic
   AdwPreferencesPage *page = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
   AdwPreferencesGroup *details = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
   AdwPreferencesGroup *extensions = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+  AdwPreferencesGroup *links = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
   GtkWidget *row = adw_action_row_new ();
   GtkWidget *menu = gtk_menu_button_new ();
   g_autoptr (GMenu) choices = g_menu_new ();
@@ -262,6 +269,23 @@ GtkWidget *ephy_web_app_dialog_new (const char *name, const char *url, GIcon *ic
   adw_preferences_group_add (details, self->name);
   adw_preferences_group_add (details, self->url);
   adw_preferences_page_add (page, details);
+  adw_preferences_group_set_title (links, _("Link Associations"));
+  adw_preferences_group_set_description (links, _("When Gnosis is your default browser, open links to these domains and their subdomains in this app."));
+  self->open_links = adw_switch_row_new ();
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->open_links), _("Open Links in This App"));
+  adw_switch_row_set_active (ADW_SWITCH_ROW (self->open_links), g_key_file_get_boolean (self->config, "Links", "enabled", NULL));
+  self->domains = adw_entry_row_new ();
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->domains), _("Domains (comma-separated)"));
+  {
+    g_auto (GStrv) domains = g_key_file_get_string_list (self->config, "Links", "domains", NULL, NULL);
+    g_autofree char *text = domains ? g_strjoinv (", ", domains) : NULL;
+    g_autoptr (GUri) address = g_uri_parse (url, G_URI_FLAGS_NONE, NULL);
+    gtk_editable_set_text (GTK_EDITABLE (self->domains), text ? text : address && g_uri_get_host (address) ? g_uri_get_host (address) : "");
+  }
+  g_object_bind_property (self->open_links, "active", self->domains, "sensitive", G_BINDING_SYNC_CREATE);
+  adw_preferences_group_add (links, self->open_links);
+  adw_preferences_group_add (links, self->domains);
+  adw_preferences_page_add (page, links);
   adw_preferences_group_set_title (extensions, _("Extensions"));
   adw_preferences_group_set_description (extensions, _("Choose the extensions available to this app. Extension data is kept separate from regular browsing. Restart the app after changing extensions."));
   add_extension (self, extensions, "ublock", _("uBlock Origin"), NULL,
@@ -319,6 +343,17 @@ GKeyFile *ephy_web_app_dialog_dup_config (EphyWebAppDialog *self) {
     if (adw_switch_row_get_active (ADW_SWITCH_ROW (row))) g_ptr_array_add (enabled, (gpointer)id);
   }
   g_key_file_set_string_list (config, "Extensions", "enabled", (const char *const *)enabled->pdata, enabled->len);
+  {
+    g_auto (GStrv) values = g_strsplit (gtk_editable_get_text (GTK_EDITABLE (self->domains)), ",", -1);
+    g_autoptr (GPtrArray) domains = g_ptr_array_new_with_free_func (g_free);
+    for (guint i = 0; values[i]; i++) {
+      char *domain = gnosis_web_app_link_domain (values[i]);
+      if (!domain) domain = g_strdup (g_strstrip (values[i]));
+      if (*domain) g_ptr_array_add (domains, domain); else g_free (domain);
+    }
+    g_key_file_set_boolean (config, "Links", "enabled", adw_switch_row_get_active (ADW_SWITCH_ROW (self->open_links)));
+    g_key_file_set_string_list (config, "Links", "domains", (const char *const *)domains->pdata, domains->len);
+  }
   return config;
 }
 

@@ -72,7 +72,8 @@ typedef enum {
 
 typedef enum {
   EPHY_STARTUP_NEW_TAB,
-  EPHY_STARTUP_NEW_WINDOW
+  EPHY_STARTUP_NEW_WINDOW,
+  EPHY_STARTUP_WEB_APP_LINK
 } EphyStartupMode;
 
 typedef struct {

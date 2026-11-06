@@ -83,6 +83,8 @@ gboolean            ephy_web_application_create (const char                 *id,
 char               *ephy_web_application_ensure_for_app_info (GAppInfo *app_info);
 
 void                ephy_web_application_launch (const char *id);
+gboolean            ephy_web_application_launch_for_uri (const char *uri);
+gboolean            ephy_web_application_route_uris (char ***uris);
 
 gboolean            ephy_web_application_delete (const char      *id,
                                                  EphyWebAppFound *out_app_found);

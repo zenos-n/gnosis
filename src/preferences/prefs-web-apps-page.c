@@ -117,7 +117,7 @@ static void prefs_web_apps_page_init (PrefsWebAppsPage *self) {
   adw_preferences_page_set_name (ADW_PREFERENCES_PAGE (self), "web-apps-page");
   adw_preferences_page_set_title (ADW_PREFERENCES_PAGE (self), _("Web Apps"));
   adw_preferences_page_set_icon_name (ADW_PREFERENCES_PAGE (self), "application-x-executable-symbolic");
-  adw_preferences_group_set_description (group, _("Select an app to change its name, icon, address, or extensions."));
+  adw_preferences_group_set_description (group, _("Select an app to change its name, icon, address, link associations, or extensions."));
   self->list = gtk_list_box_new ();
   gtk_list_box_set_selection_mode (GTK_LIST_BOX (self->list), GTK_SELECTION_NONE);
   gtk_widget_add_css_class (self->list, "boxed-list");

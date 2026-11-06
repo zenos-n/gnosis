@@ -58,6 +58,7 @@ static char *application_to_delete = NULL;
 static gboolean private_instance = FALSE;
 static gboolean incognito_mode = FALSE;
 static gboolean application_mode = FALSE;
+static gboolean web_app_link = FALSE;
 static gboolean automation_mode = FALSE;
 static char *desktop_file_basename = NULL;
 static char *profile_directory = NULL;
@@ -157,6 +158,7 @@ static const GOptionEntry option_entries[] = {
   },
   { "search", 0, 0, G_OPTION_ARG_STRING, &search_term, NULL, NULL},
   { "kiosk-mode", 0, 0, G_OPTION_ARG_NONE, &kiosk_mode, NULL, NULL},
+  { "open-web-app-link", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &web_app_link, NULL, NULL },
   { NULL }
 };
 
@@ -416,6 +418,13 @@ main (int   argc,
     arguments = args;
   }
 
+  /* Route XDG/default-browser links before registering or restoring a browser
+   * window. Explicit private, application and test profiles stay isolated. */
+  if (arguments && !application_mode && !incognito_mode && !private_instance &&
+      !automation_mode && !profile_directory && !kiosk_mode && !session_filename && !search_term) {
+    if (ephy_web_application_route_uris (&arguments)) { status = 0; goto out; }
+  }
+
   /* Delete the requested web application, if any. Must happen after
    * ephy_file_helpers_init (). */
   if (application_to_delete) {
@@ -470,7 +479,8 @@ main (int   argc,
     g_clear_pointer (&search_term, g_free);
   }
 
-  ctx = ephy_shell_startup_context_new (open_in_new_window ? EPHY_STARTUP_NEW_WINDOW : EPHY_STARTUP_NEW_TAB,
+  ctx = ephy_shell_startup_context_new (application_mode && web_app_link ? EPHY_STARTUP_WEB_APP_LINK :
+                                        open_in_new_window ? EPHY_STARTUP_NEW_WINDOW : EPHY_STARTUP_NEW_TAB,
                                         session_filename,
                                         arguments);
   g_strfreev (arguments);

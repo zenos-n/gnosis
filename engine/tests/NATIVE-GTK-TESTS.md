@@ -188,3 +188,16 @@ its temporary XDG directories. It checks Cancel, Open once, an initially uncheck
 remember checkbox, per-origin grants, private-context isolation, exact URI delivery and navigation cleanup.
 No desktop input, physical monitor or human protocol-handler registration is
 used. This does not launch Prism or exercise a real OAuth account.
+
+
+`web-app-links-gtk-probe.cpp` and `web-app-links-gtk-test.py` exercise native
+link-association controls and the real default-browser/app activation path on
+Xvfb with a private bus and disposable XDG directories. Compile with the usual
+preload flags plus `-Iengine -Isrc/preferences -Ilib` and `gio-unix-2.0` cflags.
+Run `web-app-links-gtk-test.py --gnosis "$GNOSIS" --probe "$PROBE" --xvfb "$XVFB"`.
+Optionally pass `--legacy-gnosis /path/to/older/gnosis` to check incoming URLs
+forwarded by an older installed desktop launcher to an updated running browser.
+The fixture checks a closed app, an already-running app receiving a deep link,
+ordinary launcher activation, exact encoded URLs, browser fallback, private
+isolation, disabled associations and ambiguous claims. No human XDG defaults,
+browser profile, physical display or desktop focus are changed.

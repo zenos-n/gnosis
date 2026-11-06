@@ -678,6 +678,59 @@ ephy_web_application_free (EphyWebApplication *app)
   g_free (app);
 }
 
+/* XDG dispatches HTTP(S) to the default browser; domain selection belongs here.
+ * Launch directly with an argv, not through the default browser again. */
+gboolean
+ephy_web_application_launch_for_uri (const char *uri)
+{
+  GList *apps;
+  EphyWebApplication *chosen = NULL;
+  gsize best = 0;
+  gboolean ambiguous = FALSE;
+  g_autofree char *profile = NULL;
+  g_autofree char *option = NULL;
+  g_autoptr (GSubprocess) child = NULL;
+  g_autoptr (GError) error = NULL;
+
+  if (!uri || !g_uri_peek_scheme (uri) ||
+      (g_ascii_strcasecmp (g_uri_peek_scheme (uri), "http") &&
+       g_ascii_strcasecmp (g_uri_peek_scheme (uri), "https")))
+    return FALSE;
+  apps = ephy_web_application_get_application_list ();
+  for (GList *item = apps; item; item = item->next) {
+    EphyWebApplication *app = item->data;
+    g_autofree char *directory = ephy_web_application_get_profile_directory (app->id);
+    g_autoptr (GKeyFile) config = gnosis_web_app_config_load (directory, NULL);
+    gsize match = config ? gnosis_web_app_link_match (config, uri) : 0;
+    if (match > best) { best = match; chosen = app; ambiguous = FALSE; }
+    else if (match && match == best) ambiguous = TRUE;
+  }
+  if (chosen && !ambiguous) {
+    profile = ephy_web_application_get_profile_directory (chosen->id);
+    option = g_strconcat ("--profile=", profile, NULL);
+    child = g_subprocess_new (G_SUBPROCESS_FLAGS_NONE, &error,
+                             GNOSIS_EXECUTABLE, "--application-mode", "--open-web-app-link", option, uri, NULL);
+    if (!child) g_warning ("Could not open link in web app: %s", error->message);
+  }
+  ephy_web_application_free_application_list (apps);
+  return child != NULL;
+}
+
+gboolean
+ephy_web_application_route_uris (char ***uris)
+{
+  g_autoptr (GPtrArray) remaining = g_ptr_array_new_with_free_func (g_free);
+  if (!*uris) return FALSE;
+  for (guint i = 0; (*uris)[i]; i++)
+    if (!ephy_web_application_launch_for_uri ((*uris)[i]))
+      g_ptr_array_add (remaining, g_strdup ((*uris)[i]));
+  g_clear_pointer (uris, g_strfreev);
+  if (!remaining->len) return TRUE;
+  g_ptr_array_add (remaining, NULL);
+  *uris = (char **)g_ptr_array_free (g_steal_pointer (&remaining), FALSE);
+  return FALSE;
+}
+
 static char *
 ephy_web_application_get_tmp_icon_path (const char  *desktop_path,
                                         GError     **error)
@@ -1062,6 +1115,12 @@ ephy_web_application_is_uri_allowed (const char *uri)
 
   if (urls_have_same_base_domain (uri, webapp->url))
     return TRUE;
+
+  {
+    g_autoptr (GKeyFile) config = gnosis_web_app_config_load (ephy_profile_dir (), NULL);
+    if (config && gnosis_web_app_link_match (config, uri))
+      return TRUE;
+  }
 
   if (g_strcmp0 (uri, "about:blank") == 0)
     return TRUE;

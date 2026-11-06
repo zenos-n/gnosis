@@ -44,6 +44,19 @@ unsaved-change safeguards. Field text stays inside the renderer.
 
 F3 and Shift+F3 use the native GTK find bar, including when Vim mode is off.
 
+## Web-app link associations
+
+Open **Preferences → Web Apps**, select an app, and enable **Open Links in This
+App**. The domain list starts with the app's site; add aliases separated by
+commas, for example `x.com, twitter.com`.
+
+With Gnosis as the default HTTP/HTTPS browser, incoming links for those domains
+and their subdomains open in the app's existing profile/window, or start it if
+closed. Other links and private browsing stay in the browser. These associations
+are opt-in and do not replace the system's HTTP/HTTPS default with a single app.
+A more specific domain wins; conflicting identical claims fall back to the
+browser. Disabling an association takes effect on the next incoming link.
+
 ## AI browsing (MCP)
 
 Open the **hamburger menu → AI Browsing** to control access for a connected MCP client:

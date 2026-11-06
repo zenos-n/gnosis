@@ -142,6 +142,14 @@ ephy_shell_startup_continue (EphyShell               *shell,
 
   mode = ephy_embed_shell_get_mode (EPHY_EMBED_SHELL (shell));
 
+  /* Desktop launchers can still point at an older installed binary. Apply
+   * associations in the receiving browser too, before raising its window. */
+  if (mode == EPHY_EMBED_SHELL_MODE_BROWSER && ctx == shell->remote_startup_context &&
+      !ctx->session_filename && ephy_web_application_route_uris (&ctx->arguments)) {
+    shell->startup_finished = TRUE;
+    return;
+  }
+
   if (ctx->session_filename) {
     g_assert (session);
     ephy_session_load (session, (const char *)ctx->session_filename, NULL, NULL, NULL);
@@ -159,6 +167,14 @@ ephy_shell_startup_continue (EphyShell               *shell,
 
     ephy_shell_open_uris (shell, uris, ctx->startup_mode);
     g_free (homepage_url);
+  } else if (active_window && mode == EPHY_EMBED_SHELL_MODE_APPLICATION && ctx->arguments &&
+             ctx->startup_mode == EPHY_STARTUP_WEB_APP_LINK) {
+    /* A repeated app launch may carry a deep link, not just an activation. */
+    EphyEmbed *embed = ephy_embed_container_get_active_child (EPHY_EMBED_CONTAINER (active_window));
+    for (guint i = 0; embed && ctx->arguments[i]; i++)
+      if (ephy_web_application_is_uri_allowed (ctx->arguments[i]))
+        ephy_web_view_load_url (ephy_embed_get_web_view (embed), ctx->arguments[i]);
+    gtk_window_present (active_window);
   } else if (active_window && (!ctx->arguments || mode == EPHY_EMBED_SHELL_MODE_APPLICATION)) {
     /* If the application already has an active window and: */
     /*   Option 1: the --new-window option was not passed */
