@@ -197,6 +197,8 @@ preload flags plus `-Iengine -Isrc/preferences -Ilib` and `gio-unix-2.0` cflags.
 Run `web-app-links-gtk-test.py --gnosis "$GNOSIS" --probe "$PROBE" --xvfb "$XVFB"`.
 Optionally pass `--legacy-gnosis /path/to/older/gnosis` to check incoming URLs
 forwarded by an older installed desktop launcher to an updated running browser.
+The native editor check covers AdwWrapBox domain chips, Enter/plus additions,
+duplicate prevention, invalid input, removal, wrapping and pending input on Save.
 The fixture checks a closed app, an already-running app receiving a deep link,
 ordinary launcher activation, exact encoded URLs, browser fallback, private
 isolation, disabled associations and ambiguous claims. No human XDG defaults,

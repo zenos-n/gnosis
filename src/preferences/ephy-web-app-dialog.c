@@ -10,13 +10,69 @@
 
 struct _EphyWebAppDialog {
   AdwPreferencesDialog parent_instance;
-  GtkWidget *name, *url, *preview, *error, *save, *open_links, *domains;
+  GtkWidget *name, *url, *preview, *error, *save, *open_links, *domains, *domain_entry, *domain_error;
   GIcon *icon, *site_icon;
   GKeyFile *config;
   GPtrArray *extensions;
   GCancellable *cancellable;
 };
 G_DEFINE_FINAL_TYPE (EphyWebAppDialog, ephy_web_app_dialog, ADW_TYPE_PREFERENCES_DIALOG)
+
+static void remove_domain (GtkButton *button, EphyWebAppDialog *self) {
+  gboolean focused = gtk_widget_has_focus (GTK_WIDGET (button));
+  adw_wrap_box_remove (ADW_WRAP_BOX (self->domains), GTK_WIDGET (button));
+  gtk_widget_set_visible (self->domains, gtk_widget_get_first_child (self->domains) != NULL);
+  if (focused) gtk_widget_grab_focus (self->domain_entry);
+}
+static void append_domain (EphyWebAppDialog *self, const char *domain) {
+  g_autofree char *normalized = gnosis_web_app_link_domain (domain);
+  GtkWidget *chip = gtk_button_new ();
+  GtkWidget *content = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+  GtkWidget *label = gtk_label_new (normalized ? normalized : domain);
+  g_autofree char *remove = g_strdup_printf (_("Remove %s"), normalized ? normalized : domain);
+  gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_label_set_max_width_chars (GTK_LABEL (label), 28);
+  gtk_box_append (GTK_BOX (content), label);
+  gtk_box_append (GTK_BOX (content), gtk_image_new_from_icon_name ("window-close-symbolic"));
+  gtk_button_set_child (GTK_BUTTON (chip), content);
+  gtk_widget_add_css_class (chip, "pill");
+  gtk_widget_set_tooltip_text (chip, remove);
+  gtk_accessible_update_property (GTK_ACCESSIBLE (chip), GTK_ACCESSIBLE_PROPERTY_LABEL, remove, -1);
+  g_object_set_data_full (G_OBJECT (chip), "domain", g_strdup (normalized ? normalized : domain), g_free);
+  g_signal_connect_object (chip, "clicked", G_CALLBACK (remove_domain), self, 0);
+  adw_wrap_box_append (ADW_WRAP_BOX (self->domains), chip);
+  gtk_widget_set_visible (self->domains, TRUE);
+}
+static gboolean add_domain (EphyWebAppDialog *self) {
+  const char *value = gtk_editable_get_text (GTK_EDITABLE (self->domain_entry));
+  g_autofree char *domain = NULL;
+  const char *message = NULL;
+  guint count = 0;
+  if (!*value) return TRUE;
+  domain = gnosis_web_app_link_domain (value);
+  if (!domain) message = _("Enter a domain such as example.com.");
+  for (GtkWidget *chip = gtk_widget_get_first_child (self->domains); chip; chip = gtk_widget_get_next_sibling (chip)) {
+    if (domain && !g_strcmp0 (domain, g_object_get_data (G_OBJECT (chip), "domain"))) goto added;
+    count++;
+  }
+  if (!message && count >= 64) message = _("You can add up to 64 domains.");
+  if (message) {
+    gtk_widget_add_css_class (self->domain_entry, "error");
+    gtk_label_set_text (GTK_LABEL (self->domain_error), message);
+    gtk_widget_set_visible (self->domain_error, TRUE);
+    gtk_widget_grab_focus (self->domain_entry);
+    return FALSE;
+  }
+  append_domain (self, domain);
+added:
+  gtk_editable_set_text (GTK_EDITABLE (self->domain_entry), "");
+  gtk_widget_remove_css_class (self->domain_entry, "error");
+  gtk_widget_set_visible (self->domain_error, FALSE);
+  return TRUE;
+}
+static void add_domain_clicked (GtkWidget *widget, EphyWebAppDialog *self) {
+  if (add_domain (self)) gtk_widget_grab_focus (self->domain_entry);
+}
 
 static void set_icon (EphyWebAppDialog *self, GIcon *icon) {
   g_object_set_data (G_OBJECT (self), "validated-icon", NULL);
@@ -172,6 +228,7 @@ static void accept_setup (GtkButton *button, EphyWebAppDialog *self) {
   g_autoptr (GBytes) bytes = ephy_web_app_dialog_dup_icon_bytes (self, &error);
   g_autoptr (GUri) uri = g_uri_parse (ephy_web_app_dialog_get_url (self), G_URI_FLAGS_NONE, NULL);
   const char *scheme = uri ? g_uri_get_scheme (uri) : NULL;
+  if (!add_domain (self)) return;
   if (!*ephy_web_app_dialog_get_name (self) || !scheme ||
       !(g_str_equal (scheme, "http") || g_str_equal (scheme, "https")) || !g_uri_get_host (uri)) {
     gtk_label_set_text (GTK_LABEL (self->error), _("Enter a name and an HTTP or HTTPS address.")); return;
@@ -274,16 +331,40 @@ GtkWidget *ephy_web_app_dialog_new (const char *name, const char *url, GIcon *ic
   self->open_links = adw_switch_row_new ();
   adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->open_links), _("Open Links in This App"));
   adw_switch_row_set_active (ADW_SWITCH_ROW (self->open_links), g_key_file_get_boolean (self->config, "Links", "enabled", NULL));
-  self->domains = adw_entry_row_new ();
-  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->domains), _("Domains (comma-separated)"));
+  self->domains = adw_wrap_box_new ();
+  adw_wrap_box_set_child_spacing (ADW_WRAP_BOX (self->domains), 6);
+  adw_wrap_box_set_line_spacing (ADW_WRAP_BOX (self->domains), 6);
+  gtk_widget_set_margin_top (self->domains, 12);
+  gtk_widget_set_visible (self->domains, FALSE);
+  gtk_accessible_update_property (GTK_ACCESSIBLE (self->domains), GTK_ACCESSIBLE_PROPERTY_LABEL, _("Domains"), -1);
+  self->domain_entry = adw_entry_row_new ();
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->domain_entry), _("Add Domain"));
+  {
+    GtkWidget *add = gtk_button_new_from_icon_name ("list-add-symbolic");
+    gtk_widget_add_css_class (add, "flat");
+    gtk_widget_set_valign (add, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (add, _("Add Domain"));
+    adw_entry_row_add_suffix (ADW_ENTRY_ROW (self->domain_entry), add);
+    g_signal_connect_object (add, "clicked", G_CALLBACK (add_domain_clicked), self, 0);
+    g_signal_connect_object (self->domain_entry, "entry-activated", G_CALLBACK (add_domain_clicked), self, 0);
+  }
+  self->domain_error = gtk_label_new (NULL);
+  gtk_label_set_wrap (GTK_LABEL (self->domain_error), TRUE);
+  gtk_label_set_xalign (GTK_LABEL (self->domain_error), 0);
+  gtk_widget_add_css_class (self->domain_error, "error");
+  gtk_widget_set_visible (self->domain_error, FALSE);
   {
     g_auto (GStrv) domains = g_key_file_get_string_list (self->config, "Links", "domains", NULL, NULL);
-    g_autofree char *text = domains ? g_strjoinv (", ", domains) : NULL;
     g_autoptr (GUri) address = g_uri_parse (url, G_URI_FLAGS_NONE, NULL);
-    gtk_editable_set_text (GTK_EDITABLE (self->domains), text ? text : address && g_uri_get_host (address) ? g_uri_get_host (address) : "");
+    if (domains) {
+      for (guint i = 0; domains[i]; i++) append_domain (self, domains[i]);
+    } else if (address && g_uri_get_host (address)) append_domain (self, g_uri_get_host (address));
   }
   g_object_bind_property (self->open_links, "active", self->domains, "sensitive", G_BINDING_SYNC_CREATE);
+  g_object_bind_property (self->open_links, "active", self->domain_entry, "sensitive", G_BINDING_SYNC_CREATE);
   adw_preferences_group_add (links, self->open_links);
+  adw_preferences_group_add (links, self->domain_entry);
+  adw_preferences_group_add (links, self->domain_error);
   adw_preferences_group_add (links, self->domains);
   adw_preferences_page_add (page, links);
   adw_preferences_group_set_title (extensions, _("Extensions"));
@@ -344,13 +425,9 @@ GKeyFile *ephy_web_app_dialog_dup_config (EphyWebAppDialog *self) {
   }
   g_key_file_set_string_list (config, "Extensions", "enabled", (const char *const *)enabled->pdata, enabled->len);
   {
-    g_auto (GStrv) values = g_strsplit (gtk_editable_get_text (GTK_EDITABLE (self->domains)), ",", -1);
     g_autoptr (GPtrArray) domains = g_ptr_array_new_with_free_func (g_free);
-    for (guint i = 0; values[i]; i++) {
-      char *domain = gnosis_web_app_link_domain (values[i]);
-      if (!domain) domain = g_strdup (g_strstrip (values[i]));
-      if (*domain) g_ptr_array_add (domains, domain); else g_free (domain);
-    }
+    for (GtkWidget *chip = gtk_widget_get_first_child (self->domains); chip; chip = gtk_widget_get_next_sibling (chip))
+      g_ptr_array_add (domains, g_strdup (g_object_get_data (G_OBJECT (chip), "domain")));
     g_key_file_set_boolean (config, "Links", "enabled", adw_switch_row_get_active (ADW_SWITCH_ROW (self->open_links)));
     g_key_file_set_string_list (config, "Links", "domains", (const char *const *)domains->pdata, domains->len);
   }
