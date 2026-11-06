@@ -48,7 +48,7 @@ F3 and Shift+F3 use the native GTK find bar, including when Vim mode is off.
 
 Open **Preferences → Web Apps**, select an app, and enable **Open Links in This
 App**. The domain list starts with the app's site; add aliases separated by
-commas, for example `x.com, twitter.com`.
+commas, for example `example.com, chat.example.org`.
 
 With Gnosis as the default HTTP/HTTPS browser, incoming links for those domains
 and their subdomains open in the app's existing profile/window, or start it if

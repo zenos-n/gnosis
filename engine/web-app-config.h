@@ -78,7 +78,7 @@ invalid:
   g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Invalid web app extension selection");
   return FALSE;
 invalid_links:
-  g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Enter valid domains separated by commas, such as x.com, twitter.com");
+  g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Enter valid domains separated by commas, such as example.com, chat.example.org");
   return FALSE;
 }
 
