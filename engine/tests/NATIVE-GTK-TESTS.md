@@ -18,6 +18,19 @@ permissions, concurrent updates and downgrade refusal. They need no browser.
 The `*-gtk-probe.cpp` sources preload the actual packaged Gnosis executable;
 they operate its actual GTK widgets and native browser backend. Use a disposable
 `--profile` and `GSETTINGS_BACKEND=memory`; never preload into a human profile.
+
+`keyboard-layout-gtk-test.py` runs `keyboard-layout-gtk-probe.cpp` on a private
+headless Mutter 50.4 display and D-Bus session. It configures only that compositor
+with Polish/German layouts, then sends real evdev keycodes through its remote
+input session. Check trusted Polish AltGr text (`łŁą`), pointer modifier sync,
+Ctrl+A, and switching layout groups in both directions. The old US-only compositor
+fails with `lLa`. GTK's Level3 key filtering makes copying the keymap alone
+insufficient: the forwarded modifiers must also respect the GDK event level.
+Compile the probe with the usual preload flags, `-Iengine/brave`, and the
+`gtk4 libadwaita-1 json-glib-1.0 xkbcommon` cflags; no GTK link is needed.
+Run `python3 engine/tests/keyboard-layout-gtk-test.py --gnosis "$GNOSIS" \
+--probe "$PROBE" --mutter "$MUTTER"`. This uses a separate temporary runtime,
+profile and XDG directories; no physical monitor, desktop layout or focus changes.
 They are deliberately separate from the old CEF view tests.
 
 `native-touch-gtk-probe.cpp` needs a real GNOME/Mutter desktop. Compile it like

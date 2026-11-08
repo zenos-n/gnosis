@@ -38,6 +38,7 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-names.h>
+#include <gdk/wayland/gdkwayland.h>
 
 typedef struct {
   struct wl_list link;
@@ -214,20 +215,60 @@ static void focus_left(GtkEventControllerFocus *controller, GnosisCompositorView
 }
 static void sync_modifiers(GtkEventController *controller, GnosisCompositorView *self) {
   if (!self->server) return;
+  GdkEvent *event = gtk_event_controller_get_current_event(controller);
+  GdkDevice *device = event ? gdk_event_get_device(event) : NULL;
   GdkModifierType state = gtk_event_controller_get_current_event_state(controller);
   struct wlr_keyboard *keyboard = &self->server->keyboard;
-  xkb_mod_mask_t depressed = 0, locked = 0;
+  if (device && GDK_IS_WAYLAND_DEVICE(device)) {
+    struct xkb_keymap *keymap = gdk_wayland_device_get_xkb_keymap(device);
+    if (keymap && keymap != keyboard->keymap && !wlr_keyboard_set_keymap(keyboard, keymap))
+      g_warning("Could not use the desktop keyboard layout");
+  }
+  /* GDK's public modifier mask omits AltGr/Mod5. Keep XKB's state for those. */
+  xkb_mod_mask_t depressed = keyboard->modifiers.depressed, locked = keyboard->modifiers.locked, known = 0;
   const struct { GdkModifierType flag; const char *name; } map[] = {
     {GDK_SHIFT_MASK, XKB_MOD_NAME_SHIFT}, {GDK_CONTROL_MASK, XKB_MOD_NAME_CTRL},
     {GDK_ALT_MASK, XKB_MOD_NAME_ALT}, {GDK_SUPER_MASK, XKB_MOD_NAME_LOGO},
   };
   for (guint i = 0; i < G_N_ELEMENTS(map); i++) {
     xkb_mod_index_t index = xkb_keymap_mod_get_index(keyboard->keymap, map[i].name);
-    if ((state & map[i].flag) && index != XKB_MOD_INVALID) depressed |= (xkb_mod_mask_t)1 << index;
+    if (index == XKB_MOD_INVALID) continue;
+    known |= (xkb_mod_mask_t)1 << index;
+    depressed &= ~((xkb_mod_mask_t)1 << index);
+    if (state & map[i].flag) depressed |= (xkb_mod_mask_t)1 << index;
   }
   xkb_mod_index_t caps = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_CAPS);
-  if ((state & GDK_LOCK_MASK) && caps != XKB_MOD_INVALID) locked |= (xkb_mod_mask_t)1 << caps;
-  wlr_keyboard_notify_modifiers(keyboard, depressed, 0, locked, keyboard->modifiers.group);
+  if (caps != XKB_MOD_INVALID) {
+    known |= (xkb_mod_mask_t)1 << caps;
+    locked &= ~((xkb_mod_mask_t)1 << caps);
+    if (state & GDK_LOCK_MASK) locked |= (xkb_mod_mask_t)1 << caps;
+  }
+  xkb_layout_index_t group = keyboard->modifiers.group;
+  if (event && (gdk_event_get_event_type(event) == GDK_KEY_PRESS || gdk_event_get_event_type(event) == GDK_KEY_RELEASE)) {
+    group = gdk_key_event_get_layout(event);
+    /* GTK may filter the Level3 modifier key itself. Recover selectors from
+     * the actual event level, also when AltGr was held before this view focused. */
+    if (!gdk_key_event_is_modifier(event)) {
+      xkb_keycode_t code = gdk_key_event_get_keycode(event);
+      xkb_level_index_t level = gdk_key_event_get_level(event);
+      xkb_mod_mask_t selectors = 0, best = 0;
+      guint distance = G_MAXUINT;
+      for (xkb_level_index_t i = 0; i < xkb_keymap_num_levels_for_key(keyboard->keymap, code, group); i++) {
+        xkb_mod_mask_t masks[64];
+        size_t count = xkb_keymap_key_get_mods_for_level(keyboard->keymap, code, group, i, masks, G_N_ELEMENTS(masks));
+        for (size_t j = 0; j < count; j++) {
+          selectors |= masks[j];
+          guint difference = __builtin_popcount(masks[j] ^ (depressed | locked | keyboard->modifiers.latched));
+          if (i == level && difference < distance) { best = masks[j]; distance = difference; }
+        }
+      }
+      if (distance != G_MAXUINT) {
+        selectors &= ~known;
+        depressed = (depressed & ~selectors) | (best & selectors);
+      }
+    }
+  }
+  wlr_keyboard_notify_modifiers(keyboard, depressed, keyboard->modifiers.latched, locked, group);
   wlr_seat_keyboard_notify_modifiers(self->server->seat, &keyboard->modifiers);
 }
 static void focus_entered(GtkEventControllerFocus *controller, GnosisCompositorView *self) {
@@ -805,6 +846,7 @@ void gnosis_compositor_view_release_buttons(GnosisCompositorView *self) {
 }
 static void key(GtkEventControllerKey *controller, guint code, gboolean pressed, GnosisCompositorView *self) {
   if (!self->active || code < 8) return;
+  sync_modifiers(GTK_EVENT_CONTROLLER(controller), self);
   struct wlr_keyboard_key_event event = {.time_msec = gtk_event_controller_get_current_event_time(GTK_EVENT_CONTROLLER(controller)),
     .keycode = code - 8, .update_state = TRUE, .state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED};
   wlr_keyboard_notify_key(&self->server->keyboard, &event);
