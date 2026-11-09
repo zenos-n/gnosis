@@ -75,13 +75,24 @@ static void populate_tag_detail_list_box (EphyBookmarksDialog *self,
                                           GSequence           *order);
 
 static void
+clear_inactive_tag (EphyBookmarksDialog *self)
+{
+  /* Retain the outgoing page until its slide has finished. */
+  if (!self->tag_detail_tag && !gtk_stack_get_transition_running (GTK_STACK (self->toplevel_stack)))
+    gtk_list_box_remove_all (GTK_LIST_BOX (self->tag_detail_list_box));
+}
+
+static void
 tag_detail_back (EphyBookmarksDialog *self)
 {
   g_assert (EPHY_IS_BOOKMARKS_DIALOG (self));
 
+  g_clear_pointer (&self->tag_detail_tag, g_free);
+  gtk_stack_set_visible_child_full (GTK_STACK (self->toplevel_stack), "default",
+                                   gtk_widget_get_direction (GTK_WIDGET (self)) == GTK_TEXT_DIR_RTL
+                                   ? GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT : GTK_STACK_TRANSITION_TYPE_SLIDE_RIGHT);
   gtk_editable_set_text (GTK_EDITABLE (self->search_entry), "");
-  gtk_stack_set_visible_child_name (GTK_STACK (self->toplevel_stack), "default");
-  gtk_list_box_remove_all (GTK_LIST_BOX (self->tag_detail_list_box));
+  clear_inactive_tag (self);
 }
 
 static void
@@ -983,6 +994,8 @@ ephy_bookmarks_dialog_show_tag_detail (EphyBookmarksDialog *self,
 {
   GSequence *tag_order;
 
+  gtk_list_box_remove_all (GTK_LIST_BOX (self->tag_detail_list_box));
+  g_set_str (&self->tag_detail_tag, tag);
   tag_order = ephy_bookmarks_manager_tags_order_get_tag (self->manager, tag);
   if (tag_order) {
     populate_tag_detail_list_box (self, tag_order);
@@ -1007,11 +1020,11 @@ ephy_bookmarks_dialog_show_tag_detail (EphyBookmarksDialog *self,
 
   gtk_label_set_label (GTK_LABEL (self->tag_detail_label), tag);
 
-  gtk_stack_set_visible_child_name (GTK_STACK (self->toplevel_stack), "tag_detail");
+  gtk_stack_set_visible_child_full (GTK_STACK (self->toplevel_stack), "tag_detail",
+                                   gtk_widget_get_direction (GTK_WIDGET (self)) == GTK_TEXT_DIR_RTL
+                                   ? GTK_STACK_TRANSITION_TYPE_SLIDE_RIGHT : GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT);
   gtk_editable_set_text (GTK_EDITABLE (self->search_entry), "");
   gtk_widget_set_state_flags (self->search_entry, GTK_STATE_FLAG_NORMAL, TRUE);
-
-  g_set_str (&self->tag_detail_tag, tag);
 
   update_tags_order (self);
 }
@@ -1131,7 +1144,7 @@ on_search_entry_changed (GtkSearchEntry *entry,
                          gpointer        user_data)
 {
   EphyBookmarksDialog *self = EPHY_BOOKMARKS_DIALOG (user_data);
-  gboolean tag_detail_has_row = !!gtk_list_box_get_row_at_index (GTK_LIST_BOX (self->tag_detail_list_box), 0);
+  gboolean in_tag = self->tag_detail_tag != NULL;
   GtkListBoxRow *row;
   int idx = 0;
 
@@ -1144,7 +1157,7 @@ on_search_entry_changed (GtkSearchEntry *entry,
   } else {
     gtk_widget_set_sensitive (self->edit_button, TRUE);
 
-    if (tag_detail_has_row)
+    if (in_tag)
       gtk_stack_set_visible_child_name (GTK_STACK (self->toplevel_stack), "tag_detail");
     else
       gtk_stack_set_visible_child_name (GTK_STACK (self->toplevel_stack), "default");
@@ -1152,7 +1165,7 @@ on_search_entry_changed (GtkSearchEntry *entry,
     return;
   }
 
-  if (tag_detail_has_row) {
+  if (in_tag) {
     gtk_stack_set_visible_child_name (GTK_STACK (self->toplevel_stack), "tag_detail");
 
     while ((row = gtk_list_box_get_row_at_index (GTK_LIST_BOX (self->tag_detail_list_box), idx++))) {
@@ -1336,6 +1349,8 @@ ephy_bookmarks_dialog_init (EphyBookmarksDialog *self)
   g_autoptr (GtkFilterListModel) filter_model = NULL;
 
   gtk_widget_init_template (GTK_WIDGET (self));
+  g_signal_connect_swapped (self->toplevel_stack, "notify::transition-running",
+                            G_CALLBACK (clear_inactive_tag), self);
 
   self->manager = ephy_shell_get_bookmarks_manager (ephy_shell_get_default ());
 

@@ -30,6 +30,7 @@
 #include "ephy-embed-container.h"
 #include "ephy-settings.h"
 #include "ephy-shell.h"
+#include "ephy-uri-helpers.h"
 
 struct _EphyBookmarkRow {
   AdwActionRow parent_instance;
@@ -255,6 +256,35 @@ ephy_bookmark_row_map (GtkWidget *widget)
   ephy_bookmark_start_loading_icon (self->bookmark);
 }
 
+static gboolean
+transform_bookmark_site (GBinding     *binding,
+                         const GValue *from_value,
+                         GValue       *to_value,
+                         gpointer      user_data)
+{
+  const char *url = g_value_get_string (from_value);
+  g_autofree char *decoded = url ? ephy_uri_decode (url) : NULL;
+  g_autofree char *host = decoded ? ephy_uri_get_decoded_host (decoded) : NULL;
+
+  g_value_set_string (to_value, host ? host : "");
+  return TRUE;
+}
+
+static gboolean
+transform_bookmark_icon (GBinding     *binding,
+                         const GValue *from_value,
+                         GValue       *to_value,
+                         gpointer      user_data)
+{
+  GIcon *icon = g_value_get_object (from_value);
+
+  if (icon)
+    g_value_set_object (to_value, icon);
+  else
+    g_value_take_object (to_value, g_themed_icon_new ("web-browser-symbolic"));
+  return TRUE;
+}
+
 static void
 ephy_bookmark_row_constructed (GObject *object)
 {
@@ -269,9 +299,12 @@ ephy_bookmark_row_constructed (GObject *object)
                                NULL,
                                self, NULL);
 
-  g_object_bind_property (self->bookmark, "icon",
-                          self->favicon_image, "gicon",
-                          G_BINDING_SYNC_CREATE);
+  g_object_bind_property_full (self->bookmark, "bmkUri", self, "subtitle",
+                               G_BINDING_SYNC_CREATE, transform_bookmark_site,
+                               NULL, NULL, NULL);
+  g_object_bind_property_full (self->bookmark, "icon", self->favicon_image, "gicon",
+                               G_BINDING_SYNC_CREATE, transform_bookmark_icon,
+                               NULL, NULL, NULL);
 
   g_signal_connect_object (self->bookmark,
                            "notify::title",

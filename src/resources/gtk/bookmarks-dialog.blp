@@ -3,12 +3,13 @@ using Adw 1;
 
 template $EphyBookmarksDialog: Adw.Bin {
   Adw.ToolbarView toolbar_view {
-    extend-content-to-top-edge: true;
     bottom-bar-style: raised;
 
     [top]
     Adw.HeaderBar {
-      show-title: false;
+      title-widget: Adw.WindowTitle {
+        title: _("Bookmarks");
+      };
       show-end-title-buttons: false;
 
       [start]
@@ -51,127 +52,88 @@ template $EphyBookmarksDialog: Adw.Bin {
         margin-top: 12;
         margin-bottom: 12;
 
-        Label {
-          label: _("Bookmarks");
-          margin-top: 24;
-          margin-bottom: 24;
+        SearchEntry search_entry {
+          placeholder-text: _("Search bookmarks");
+          search-changed => $on_search_entry_changed();
 
-          styles [
-            "title-1",
-          ]
+          EventControllerKey {
+            key-pressed => $on_search_entry_key_pressed();
+          }
         }
 
-        Box {
-          valign: start;
-          orientation: vertical;
-          spacing: 24;
+        Stack toplevel_stack {
+          hexpand: true;
+          vexpand: true;
+          transition-duration: 300;
 
-          SearchEntry search_entry {
-            placeholder-text: _("Search bookmarks");
-            search-changed => $on_search_entry_changed();
-
-            EventControllerKey {
-              key-pressed => $on_search_entry_key_pressed();
-            }
+          StackPage {
+            name: "default";
+            child: ScrolledWindow {
+              hscrollbar-policy: never;
+              child: ListBox bookmarks_list_box {
+                selection-mode: none;
+                valign: start;
+                styles [ "boxed-list" ]
+              };
+            };
           }
 
-          ScrolledWindow {
-            propagate-natural-height: true;
+          StackPage {
+            name: "searching_bookmarks";
+            child: ScrolledWindow {
+              hscrollbar-policy: never;
+              child: ListBox searching_bookmarks_list_box {
+                selection-mode: none;
+                valign: start;
+                styles [ "boxed-list" ]
+              };
+            };
+          }
 
-            styles [
-              "undershoot-top",
-            ]
+          StackPage {
+            name: "tag_detail";
+            child: Box {
+              orientation: vertical;
+              spacing: 12;
 
-            child: Stack toplevel_stack {
-              vhomogeneous: false;
-              interpolate-size: true;
-              hexpand: true;
-              margin-start: 2;
-              margin-end: 2;
-              margin-top: 2;
-              margin-bottom: 2;
+              CenterBox {
+                start-widget: Button tag_detail_back_button {
+                  action-name: "dialog.tag-detail-back";
+                  icon-name: "go-previous-symbolic";
+                  tooltip-text: _("All Bookmarks");
+                  styles [ "flat" ]
+                };
+                center-widget: Label tag_detail_label {
+                  ellipsize: end;
+                  max-width-chars: 0;
+                  hexpand: true;
+                  styles [ "heading" ]
+                };
+              }
 
-              StackPage {
-                name: "default";
-
-                child: ListBox bookmarks_list_box {
+              ScrolledWindow {
+                vexpand: true;
+                hscrollbar-policy: never;
+                child: ListBox tag_detail_list_box {
                   selection-mode: none;
-
-                  styles [
-                    "boxed-list",
-                  ]
-                };
-              }
-
-              StackPage {
-                name: "searching_bookmarks";
-
-                child: ListBox searching_bookmarks_list_box {
-                  selection-mode: none;
-
-                  styles [
-                    "boxed-list",
-                  ]
-                };
-              }
-
-              StackPage {
-                name: "tag_detail";
-
-                child: Box {
-                  orientation: vertical;
-                  spacing: 6;
-
-                  CenterBox {
-                    start-widget: Button tag_detail_back_button {
-                      action-name: "dialog.tag-detail-back";
-                      icon-name: "go-previous-symbolic";
-                      margin-start: 6;
-                      margin-end: 6;
-
-                      styles [
-                        "flat",
-                      ]
-                    };
-
-                    center-widget: Label tag_detail_label {
-                      styles [
-                        "heading",
-                      ]
-
-                      ellipsize: end;
-                      max-width-chars: 0;
-                      hexpand: true;
-                    };
-                  }
-
-                  ListBox tag_detail_list_box {
-                    selection-mode: none;
-
-                    styles [
-                      "boxed-list",
-                    ]
-                  }
-                };
-              }
-
-              StackPage {
-                name: "empty-state";
-
-                child: Adw.StatusPage {
-                  icon-name: "ephy-starred-symbolic";
-                  title: _("No Bookmarks");
-                  description: _("Bookmarked pages will appear here");
-
-                  styles [
-                    "compact",
-                    "dim-label",
-                  ]
+                  valign: start;
+                  styles [ "boxed-list" ]
                 };
               }
             };
           }
+
+          StackPage {
+            name: "empty-state";
+            child: Adw.StatusPage {
+              icon-name: "ephy-starred-symbolic";
+              title: _("No Bookmarks");
+              description: _("Bookmarked pages will appear here");
+              styles [ "compact" ]
+            };
+          }
         }
+
       };
     };
   }

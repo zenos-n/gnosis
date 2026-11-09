@@ -19,6 +19,17 @@ The `*-gtk-probe.cpp` sources preload the actual packaged Gnosis executable;
 they operate its actual GTK widgets and native browser backend. Use a disposable
 `--profile` and `GSETTINGS_BACKEND=memory`; never preload into a human profile.
 
+`bookmarks-gtk-test.py` uses a private bus/Xvfb display and disposable profile to
+exercise the actual sidebar with fixture bookmarks. Compile
+`bookmarks-gtk-probe.cpp` with the normal preload flags, `-Isrc/bookmarks`, and
+`gtk4 libadwaita-1 json-glib-1.0` cflags. Run with `--gnosis "$GNOSIS" --probe
+"$PROBE" --xvfb "$XVFB"`; optional `--capture-tool /path/to/import` records
+whole-window screenshots in `/tmp/gnosis-bookmarks-screen-*.png`.
+It checks running forward/back slides, preservation/retirement of outgoing rows,
+repeated category navigation, domain subtitles and favicon fallback, search
+within/across categories, editing, RTL and disabled animations. Screenshots come
+from the isolated X11 window; no desktop focus or user bookmark data is used.
+
 `keyboard-layout-gtk-test.py` runs `keyboard-layout-gtk-probe.cpp` on a private
 headless Mutter 50.4 display and D-Bus session. It configures only that compositor
 with Polish/German layouts, then sends real evdev keycodes through its remote
