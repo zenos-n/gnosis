@@ -105,6 +105,8 @@ private:
   void internal_request(JsonObject*);
   void show_context_menu(JsonObject*, int context);
   void dismiss_context_menu();
+  void show_emoji_picker();
+  void dismiss_emoji_picker();
   void show_script_dialog(JsonObject*);
   void show_close_failure(const std::string&);
   void dismiss_script_dialog(bool cancel);

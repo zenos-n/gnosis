@@ -867,6 +867,8 @@ const char *gnosis_compositor_vim_key(guint value, GdkModifierType modifiers) {
 void gnosis_compositor_view_set_vim_field(GnosisCompositorView *self, gboolean enabled) { self->vim_field = enabled; }
 gboolean gnosis_compositor_is_host_shortcut(guint value, GdkModifierType modifiers) {
   value = gdk_keyval_to_lower(value);
+  if (value == GDK_KEY_semicolon)
+    return (modifiers & gtk_accelerator_get_default_mod_mask()) == GDK_CONTROL_MASK;
   if (value == GDK_KEY_F3) return TRUE;
   if (modifiers & GDK_SUPER_MASK) return TRUE;
   if ((modifiers & GDK_ALT_MASK) && (value == GDK_KEY_Left || value == GDK_KEY_Right || value == GDK_KEY_Home)) return TRUE;
@@ -886,6 +888,9 @@ gboolean gnosis_compositor_is_host_shortcut(guint value, GdkModifierType modifie
   }
 }
 static gboolean key_pressed(GtkEventControllerKey *controller, guint value, guint code, GdkModifierType modifiers, GnosisCompositorView *self) {
+  if (value == GDK_KEY_semicolon && (modifiers & gtk_accelerator_get_default_mod_mask()) == GDK_CONTROL_MASK) {
+    g_signal_emit_by_name(self, "insert-emoji"); return TRUE;
+  }
   const char *vim = self->vim_field ? gnosis_compositor_vim_key(value, modifiers) : NULL;
   if (vim) { g_signal_emit_by_name(self, "vim-command", vim); return TRUE; }
   if (value == GDK_KEY_Escape && self->constraint) {
@@ -963,6 +968,7 @@ static void gnosis_compositor_view_class_init(GnosisCompositorViewClass *klass) 
   g_signal_new("touch-navigation", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_INT);
   g_signal_new("touch-swipe-begin", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, NULL, NULL, G_TYPE_BOOLEAN, 1, G_TYPE_INT);
   g_signal_new("vim-command", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+  g_signal_new("insert-emoji", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   g_signal_new("fullscreen-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
   g_signal_new("drag-preview-image", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, GDK_TYPE_DRAG, G_TYPE_STRING);
 }

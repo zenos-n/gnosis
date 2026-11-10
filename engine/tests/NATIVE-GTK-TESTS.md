@@ -30,6 +30,15 @@ repeated category navigation, domain subtitles and favicon fallback, search
 within/across categories, editing, RTL and disabled animations. Screenshots come
 from the isolated X11 window; no desktop focus or user bookmark data is used.
 
+`emoji-gtk-test.py` runs `emoji-gtk-probe.cpp` with real Ctrl+semicolon input,
+GTK's emoji chooser, and disposable HTML editors on a private bus/Xvfb display.
+Compile with the usual preload flags, `-Iengine/brave`, and
+`gtk4 libadwaita-1 json-glib-1.0` cflags. Set `GNOSIS_XDOTOOL` to xdotool and run
+with `--gnosis "$GNOSIS" --probe "$PROBE" --xvfb "$XVFB"`. It checks Unicode
+selection replacement and undo, textareas/contenteditable/shadow DOM, same-origin
+and cross-process frames, Escape, changed-field/tab/navigation cancellation,
+read-only controls, and the unchanged native GTK entry shortcut.
+
 `keyboard-layout-gtk-test.py` runs `keyboard-layout-gtk-probe.cpp` on a private
 headless Mutter 50.4 display and D-Bus session. It configures only that compositor
 with Polish/German layouts, then sends real evdev keycodes through its remote

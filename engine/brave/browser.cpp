@@ -197,6 +197,10 @@ struct Page::State {
   GtkWindow* devtools_window = nullptr;
   std::string devtools_target;
   GtkWidget* context_menu = nullptr;
+  GtkWidget* emoji_picker = nullptr;
+  int emoji_context = 0;
+  guint64 emoji_generation = 0;
+  std::set<std::string> emoji_sessions;
   AdwDialog* script_dialog = nullptr;
   gulong script_dialog_response = 0;
   guint64 script_dialog_generation = 0;
@@ -1445,6 +1449,9 @@ Page::Page(GtkWidget* widget, bool ephemeral) : state_(std::make_unique<State>(w
   auto* keys = gtk_event_controller_key_new();
   gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_BUBBLE);
   g_signal_connect(keys, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey* controller, guint value, guint, GdkModifierType modifiers, Page* self) -> gboolean {
+    if (value == GDK_KEY_semicolon && (modifiers & gtk_accelerator_get_default_mod_mask()) == GDK_CONTROL_MASK) {
+      self->show_emoji_picker(); return TRUE;
+    }
     if (self->state_->vim_context) if (const char* command = gnosis_compositor_vim_key(value, modifiers)) { self->vim_key(command); return TRUE; }
     if (gnosis_compositor_is_host_shortcut(value, modifiers)) return FALSE;
     self->send_key(gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller)));
@@ -1510,6 +1517,7 @@ void Page::adopt_surface(GtkWidget* widget) {
     static_cast<Page*>(data)->update_portal_parent();
   }), this);
   g_signal_connect(widget, "vim-command", G_CALLBACK(+[](GtkWidget*, const char* command, gpointer data) { static_cast<Page*>(data)->vim_key(command); }), this);
+  g_signal_connect(widget, "insert-emoji", G_CALLBACK(+[](GtkWidget*, gpointer data) { static_cast<Page*>(data)->show_emoji_picker(); }), this);
   g_signal_connect(widget, "surface-ready", G_CALLBACK(+[](GtkWidget*, gpointer data) { static_cast<Page*>(data)->surface_ready(); }), this);
   g_signal_connect(widget, "fullscreen-changed", G_CALLBACK(+[](GtkWidget*, gboolean value, gpointer data) {
     auto* page = static_cast<Page*>(data); if (page->fullscreen_changed) page->fullscreen_changed(value);
@@ -1836,6 +1844,7 @@ void Page::offer_http_retry(const std::string& address) {
     }, new Retry{weak_from_this(), "http://" + address.substr(8), state_->navigation_generation});
 }
 void Page::navigate(const std::string& value) {
+  dismiss_emoji_picker();
   remember_navigation_preview();
   dismiss_http_retry();
   dismiss_passkey_provider();
@@ -2005,11 +2014,13 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
   } else if (method == "Fetch.requestPaused") {
     internal_request(params);
   } else if (method == "Runtime.executionContextsCleared") {
+    dismiss_emoji_picker();
     if (state_->install_external) dismiss_install_dialog(true);
     set_vim_context(0); dismiss_vim_commands();
     dismiss_context_menu(); state_->menu_contexts.clear(); state_->menu_frames.clear(); state_->menu_sessions.clear(); state_->metadata_contexts.clear(); state_->metadata_unique.clear();
     state_->context_id = 0; state_->context_unique.clear();
   } else if (method == "Runtime.executionContextDestroyed") {
+    if (state_->emoji_context == json_object_get_int_member_with_default(params, "executionContextId", 0)) dismiss_emoji_picker();
     state_->menu_contexts.erase(json_object_get_int_member_with_default(params, "executionContextId", 0));
     state_->menu_frames.erase(json_object_get_int_member_with_default(params, "executionContextId", 0));
     state_->menu_sessions.erase(json_object_get_int_member_with_default(params, "executionContextId", 0));
@@ -2463,6 +2474,7 @@ void Page::send_key(GdkEvent* source) {
 void Page::dismiss_context_menu() {
   if (state_->context_menu) gtk_popover_popdown(GTK_POPOVER(state_->context_menu));
 }
+#include "emoji-picker.inc"
 void Page::dismiss_install_dialog(bool cancel) {
   auto& s = *state_;
   const gint64 id = std::exchange(s.install_id, 0);
@@ -3573,6 +3585,7 @@ void Page::show_context_menu(JsonObject* hit, int context) {
   gtk_popover_popup(GTK_POPOVER(popover));
 }
 void Page::set_visible(bool visible) {
+  if (!visible) dismiss_emoji_picker();
   if (!visible) dismiss_http_retry();
   if (!visible) { dismiss_context_menu(); dismiss_script_dialog(true); dismiss_install_dialog(true); dismiss_authenticator(true); dismiss_passkey_provider(); }
   state_->mapped = visible;
@@ -3628,6 +3641,7 @@ void Page::show_devtools() {
     });
 }
 void Page::close() {
+  dismiss_emoji_picker();
   dismiss_http_retry();
   dismiss_passkey_provider();
   stop_find();
