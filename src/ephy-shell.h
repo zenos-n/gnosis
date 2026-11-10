@@ -73,7 +73,9 @@ typedef enum {
 typedef enum {
   EPHY_STARTUP_NEW_TAB,
   EPHY_STARTUP_NEW_WINDOW,
-  EPHY_STARTUP_WEB_APP_LINK
+  EPHY_STARTUP_WEB_APP_LINK,
+  EPHY_STARTUP_BROWSER_LINK,
+  EPHY_STARTUP_BROWSER_WINDOW
 } EphyStartupMode;
 
 typedef struct {
@@ -83,6 +85,9 @@ typedef struct {
 } EphyShellStartupContext;
 
 EphyShell               *ephy_shell_get_default             (void);
+gboolean                 ephy_shell_open_external_uri       (EphyShell *shell,
+                                                             const char *uri,
+                                                             gboolean new_window);
 
 EphyEmbed               *ephy_shell_new_tab                 (EphyShell        *shell,
                                                              EphyWindow       *parent_window,

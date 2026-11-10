@@ -281,6 +281,12 @@ struct ViewData {
       gboolean handled = false;
       g_signal_emit_by_name(self, value ? "enter-fullscreen" : "leave-fullscreen", &handled);
     };
+    browser->on_open_uri = [this](const std::string& uri) {
+      if (disposed || detached || browser->is_extension_popup) return false;
+      gboolean handled = false;
+      g_signal_emit_by_name(self, "open-new-uri", uri.c_str(), &handled);
+      return bool(handled);
+    };
     browser->on_create_popup = [this](const std::string&, const CefPopupFeatures& features) -> CefRefPtr<Browser> {
       if (disposed || detached) return nullptr;
       g_autoptr(EphyEngineView) keep_alive = EPHY_ENGINE_VIEW(g_object_ref(self));
@@ -785,6 +791,7 @@ static void ephy_engine_web_view_class_init(EphyEngineViewClass* klass) {
   g_signal_new("load-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(EphyEngineViewClass, load_changed), nullptr, nullptr, nullptr, G_TYPE_NONE, 1, WEBKIT_TYPE_LOAD_EVENT);
   g_signal_new("load-failed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(EphyEngineViewClass, load_failed), g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 3, WEBKIT_TYPE_LOAD_EVENT, G_TYPE_STRING, G_TYPE_ERROR);
   g_signal_new("create-popup", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(EphyEngineViewClass, create_popup), g_signal_accumulator_first_wins, nullptr, nullptr, GTK_TYPE_WIDGET, 1, G_TYPE_POINTER);
+  g_signal_new("open-new-uri", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 1, G_TYPE_STRING);
   g_signal_new("popup-geometry-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   g_signal_new("extension-popup-size-changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   g_signal_new("ready-to-show", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(EphyEngineViewClass, ready_to_show), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);

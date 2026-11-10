@@ -365,7 +365,9 @@ void Browser::start() {
       brave_->tls_changed = [this] { if (on_security_changed) on_security_changed(); };
       brave_->fullscreen_changed = [this](bool value) { if (on_fullscreen_changed) on_fullscreen_changed(value); };
       brave_->open_uri = [this](const std::string& uri) {
-        if (closing || !on_create_popup) return false;
+        if (closing) return false;
+        if (on_open_uri && on_open_uri(uri)) return true;
+        if (!on_create_popup) return false;
         CefPopupFeatures features;
         auto child = on_create_popup(uri, features);
         if (!child || child->closing) return false;
@@ -529,6 +531,7 @@ void Browser::detach_callbacks() {
   on_closed = nullptr;
   on_close_cancelled = nullptr;
   on_create_popup = nullptr;
+  on_open_uri = nullptr;
   on_ready = nullptr;
   on_contents_bounds_change = nullptr;
   on_load_end = nullptr;

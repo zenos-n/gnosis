@@ -109,6 +109,7 @@ public:
   std::function<void(const std::string&, const std::string&, GdkTexture*)> on_favicon;
   std::function<void()> on_close_cancelled;
   std::function<CefRefPtr<Browser>(const std::string&, const CefPopupFeatures&)> on_create_popup;
+  std::function<bool(const std::string&)> on_open_uri;
   std::function<void()> on_ready;
   std::function<void(const CefRect&)> on_contents_bounds_change;
   std::function<bool(EphyEnginePermission*)> on_permission;

@@ -61,6 +61,10 @@ are opt-in and do not replace the system's HTTP/HTTPS default with a single app.
 A more specific domain wins; conflicting identical claims fall back to the
 browser. Disabling an association takes effect on the next incoming link.
 
+In a web app, middle-click and **Open Link in New Tab / New Window** send links
+outside its sites to regular Gnosis. The app's own site and configured domains
+stay in the app. This explicit browser choice bypasses other web-app associations.
+
 ## AI browsing (MCP)
 
 Open the **hamburger menu → AI Browsing** to control access for a connected MCP client:

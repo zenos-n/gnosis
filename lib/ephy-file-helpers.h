@@ -76,6 +76,8 @@ gboolean           ephy_file_delete_dir_recursively         (const char         
                                                              GError               **error);
 char       *       ephy_sanitize_filename                   (char                  *filename);
 void               ephy_open_default_instance_window        (void);
+void               ephy_open_browser_uri                    (const char            *uri,
+                                                             gboolean               new_window);
 void               ephy_open_incognito_window               (const char            *uri);
 gboolean           ephy_file_open_uri_in_default_browser    (const char            *uri,
                                                              GdkDisplay            *display);

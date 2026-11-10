@@ -827,6 +827,19 @@ ephy_open_incognito_window (const char *uri)
 }
 
 void
+ephy_open_browser_uri (const char *uri,
+                       gboolean    new_window)
+{
+  const char *tab_arguments[] = { "--open-in-browser", "--", uri, NULL };
+  const char *window_arguments[] = { "--open-in-browser", "--new-window", "--", uri, NULL };
+  g_autoptr (GError) error = NULL;
+
+  spawn_current_instance (new_window ? window_arguments : tab_arguments, &error);
+  if (error)
+    g_warning ("Couldn't open link in Gnosis: %s", error->message);
+}
+
+void
 ephy_copy_directory (const char *source,
                      const char *target)
 {

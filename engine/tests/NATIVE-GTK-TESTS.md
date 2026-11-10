@@ -39,6 +39,14 @@ selection replacement and undo, textareas/contenteditable/shadow DOM, same-origi
 and cross-process frames, Escape, changed-field/tab/navigation cancellation,
 read-only controls, and the unchanged native GTK entry shortcut.
 
+`web-app-external-gtk-test.py` uses `web-app-external-gtk-probe.cpp` with the same
+compile flags and `GNOSIS_XDOTOOL`/`--gnosis`/`--probe`/`--xvfb` arguments.
+Real middle-click and GTK context-menu item activation must hand out-of-app
+links to a cold/running regular browser, even when another app claims the URL.
+It checks New Tab versus New Window, keeps the source app untouched, and retains
+same-site and explicitly configured app domains. All windows, input and bus
+activation stay on its private display/session.
+
 `keyboard-layout-gtk-test.py` runs `keyboard-layout-gtk-probe.cpp` on a private
 headless Mutter 50.4 display and D-Bus session. It configures only that compositor
 with Polish/German layouts, then sends real evdev keycodes through its remote

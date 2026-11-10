@@ -1676,6 +1676,14 @@ create_popup_cb (EphyEngineView                       *web_view,
   return GTK_WIDGET (new_web_view);
 }
 
+static gboolean
+open_new_uri_cb (EphyEngineView *web_view,
+                  const char     *uri,
+                  EphyWindow     *window)
+{
+  return ephy_shell_open_external_uri (ephy_shell_get_default (), uri, FALSE);
+}
+
 
 typedef struct {
   GWeakRef view;
@@ -2345,6 +2353,9 @@ ephy_window_connect_active_embed (EphyWindow *window)
 
   g_signal_connect_object (web_view, "create-popup",
                            G_CALLBACK (create_popup_cb),
+                           window, G_CONNECT_DEFAULT);
+  g_signal_connect_object (web_view, "open-new-uri",
+                           G_CALLBACK (open_new_uri_cb),
                            window, G_CONNECT_DEFAULT);
   g_signal_connect_object (web_view, "open-external-uri",
                            G_CALLBACK (open_external_uri_cb),

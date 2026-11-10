@@ -59,6 +59,7 @@ static gboolean private_instance = FALSE;
 static gboolean incognito_mode = FALSE;
 static gboolean application_mode = FALSE;
 static gboolean web_app_link = FALSE;
+static gboolean open_in_browser = FALSE;
 static gboolean automation_mode = FALSE;
 static char *desktop_file_basename = NULL;
 static char *profile_directory = NULL;
@@ -159,6 +160,7 @@ static const GOptionEntry option_entries[] = {
   { "search", 0, 0, G_OPTION_ARG_STRING, &search_term, NULL, NULL},
   { "kiosk-mode", 0, 0, G_OPTION_ARG_NONE, &kiosk_mode, NULL, NULL},
   { "open-web-app-link", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &web_app_link, NULL, NULL },
+  { "open-in-browser", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &open_in_browser, NULL, NULL },
   { NULL }
 };
 
@@ -420,7 +422,7 @@ main (int   argc,
 
   /* Route XDG/default-browser links before registering or restoring a browser
    * window. Explicit private, application and test profiles stay isolated. */
-  if (arguments && !application_mode && !incognito_mode && !private_instance &&
+  if (arguments && !open_in_browser && !application_mode && !incognito_mode && !private_instance &&
       !automation_mode && !profile_directory && !kiosk_mode && !session_filename && !search_term) {
     if (ephy_web_application_route_uris (&arguments)) { status = 0; goto out; }
   }
@@ -480,6 +482,7 @@ main (int   argc,
   }
 
   ctx = ephy_shell_startup_context_new (application_mode && web_app_link ? EPHY_STARTUP_WEB_APP_LINK :
+                                        open_in_browser ? (open_in_new_window ? EPHY_STARTUP_BROWSER_WINDOW : EPHY_STARTUP_BROWSER_LINK) :
                                         open_in_new_window ? EPHY_STARTUP_NEW_WINDOW : EPHY_STARTUP_NEW_TAB,
                                         session_filename,
                                         arguments);

@@ -83,6 +83,8 @@ context_cmd_open_selection_in_new_tab (GSimpleAction *action,
   g_assert (EPHY_IS_EMBED (embed));
 
   open_term = g_variant_get_string (parameter, NULL);
+  if (ephy_shell_open_external_uri (ephy_shell_get_default (), open_term, FALSE))
+    return;
   if (g_settings_get_boolean (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_SWITCH_TO_NEW_TAB))
     flags |= EPHY_NEW_TAB_JUMP;
 
@@ -107,6 +109,8 @@ context_cmd_open_selection_in_new_window (GSimpleAction *action,
   g_assert (EPHY_IS_EMBED (embed));
 
   open_term = g_variant_get_string (parameter, NULL);
+  if (ephy_shell_open_external_uri (ephy_shell_get_default (), open_term, TRUE))
+    return;
   new_embed = ephy_shell_new_tab (ephy_shell_get_default (),
                                   ephy_window_new (), embed, 0);
   ephy_web_view_load_url (ephy_embed_get_web_view (new_embed), open_term);

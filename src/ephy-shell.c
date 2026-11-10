@@ -131,12 +131,29 @@ ephy_shell_startup_context_free (EphyShellStartupContext *ctx)
   g_free (ctx);
 }
 
+gboolean
+ephy_shell_open_external_uri (EphyShell  *shell,
+                              const char *uri,
+                              gboolean    new_window)
+{
+  const char *scheme = uri ? g_uri_peek_scheme (uri) : NULL;
+
+  if (ephy_embed_shell_get_mode (EPHY_EMBED_SHELL (shell)) != EPHY_EMBED_SHELL_MODE_APPLICATION ||
+      !scheme || (g_ascii_strcasecmp (scheme, "http") && g_ascii_strcasecmp (scheme, "https")) ||
+      ephy_web_application_is_uri_allowed (uri))
+    return FALSE;
+
+  ephy_open_browser_uri (uri, new_window);
+  return TRUE;
+}
+
 static void
 ephy_shell_startup_continue (EphyShell               *shell,
                              EphyShellStartupContext *ctx)
 {
   EphySession *session = ephy_shell_get_session (shell);
-  gboolean new_window_option = (ctx->startup_mode == EPHY_STARTUP_NEW_WINDOW);
+  gboolean new_window_option = (ctx->startup_mode == EPHY_STARTUP_NEW_WINDOW ||
+                                 ctx->startup_mode == EPHY_STARTUP_BROWSER_WINDOW);
   GtkWindow *active_window = gtk_application_get_active_window (GTK_APPLICATION (shell));
   EphyEmbedShellMode mode;
 
@@ -145,6 +162,7 @@ ephy_shell_startup_continue (EphyShell               *shell,
   /* Desktop launchers can still point at an older installed binary. Apply
    * associations in the receiving browser too, before raising its window. */
   if (mode == EPHY_EMBED_SHELL_MODE_BROWSER && ctx == shell->remote_startup_context &&
+      ctx->startup_mode != EPHY_STARTUP_BROWSER_LINK && ctx->startup_mode != EPHY_STARTUP_BROWSER_WINDOW &&
       !ctx->session_filename && ephy_web_application_route_uris (&ctx->arguments)) {
     shell->startup_finished = TRUE;
     return;
@@ -1583,7 +1601,7 @@ open_uris_data_new (EphyShell        *shell,
 
   data->flags |= EPHY_NEW_TAB_JUMP;
 
-  if (startup_mode == EPHY_STARTUP_NEW_WINDOW && !fullscreen_lockdown) {
+  if ((startup_mode == EPHY_STARTUP_NEW_WINDOW || startup_mode == EPHY_STARTUP_BROWSER_WINDOW) && !fullscreen_lockdown) {
     data->window = ephy_window_new ();
   } else {
     data->window = EPHY_WINDOW (gtk_application_get_active_window (GTK_APPLICATION (shell)));
