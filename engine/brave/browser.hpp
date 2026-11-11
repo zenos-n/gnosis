@@ -106,7 +106,8 @@ private:
   void show_context_menu(JsonObject*, int context);
   void dismiss_context_menu();
   void show_emoji_picker();
-  void dismiss_emoji_picker();
+  void capture_emoji_picker(guint64 generation);
+  void dismiss_emoji_picker(bool restore_focus = false);
   void show_script_dialog(JsonObject*);
   void show_close_failure(const std::string&);
   void dismiss_script_dialog(bool cancel);

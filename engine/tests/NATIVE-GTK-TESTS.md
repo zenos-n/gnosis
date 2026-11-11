@@ -38,8 +38,11 @@ with `--gnosis "$GNOSIS" --probe "$PROBE" --xvfb "$XVFB"`. It checks Unicode
 selection replacement and undo, textareas/contenteditable/shadow DOM, same-origin
 and cross-process frames, Escape, changed-field/tab/navigation cancellation,
 read-only controls, and the unchanged native GTK entry shortcut. It also checks
-focused-field anchor bounds through local/cross-process frames and page zoom,
-with cold/warm shortcut-to-visible-popup timing below 400 ms. Optional
+the actual native caret moving within a stationary field, RTL, collapsed rich-text
+ranges, scrolled/wrapped inputs, transformed cross-process frames and page zoom,
+with cold/warm shortcut-to-visible-popup timing below 400 ms. The backend receives
+Chromium's `text-input-v3` cursor rectangles; it does not estimate glyph positions
+with hidden DOM mirrors. Optional
 `--capture-tool /path/to/import` captures the private display to
 `/tmp/gnosis-emoji-anchor.png`.
 

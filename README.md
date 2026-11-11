@@ -18,7 +18,7 @@ store their profiles directly in `gnosis`. Bundled extension public keys remain
 unchanged, preserving KeePassXC pairing and extension storage. Migration refuses
 to run while the previous browser is open or overwrite conflicting directories.
 
-Press **Ctrl+;** in a page text field to open GTK's native emoji picker. Choosing
+Press **Ctrl+;** in a page text field to open GTK's native emoji picker at the text cursor. Choosing
 an emoji replaces the selection or inserts it at the caret, with normal undo.
 
 Enable **Vim Mode** in **Preferences → General → Browsing** for keyboard navigation.

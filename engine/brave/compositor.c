@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <drm_fourcc.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
@@ -31,6 +32,7 @@
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_text_input_v3.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -52,6 +54,9 @@ typedef struct {
   GWeakRef fullscreen_window;
   gboolean owns_fullscreen;
   gboolean content_fullscreen;
+  struct wlr_box caret;
+  gboolean caret_valid;
+  gboolean caret_held;
 } View;
 typedef struct {
   GnosisCompositor *server;
@@ -75,6 +80,8 @@ struct _GnosisCompositor {
   struct wlr_renderer *renderer;
   struct wlr_output *output;
   struct wlr_seat *seat;
+  struct wlr_text_input_manager_v3 *text_inputs;
+  struct wl_listener new_text_input, text_input_focus;
   GnosisClipboardBridge *clipboard;
   DesktopDrag *export_drag;
   ImportedDrag *import_drag;
@@ -139,6 +146,58 @@ static void end_swipe(GnosisCompositorView *self, int direction);
 
 static void listen(struct wl_signal *signal, struct wl_listener *listener, wl_notify_func_t callback) {
   listener->notify = callback; wl_signal_add(signal, listener);
+}
+typedef struct {
+  struct wlr_text_input_v3 *input;
+  struct wl_listener enable, commit, disable, destroy;
+} TextInput;
+static void enter_text_input(struct wlr_text_input_v3 *input, struct wlr_surface *surface) {
+  if (input->focused_surface == surface) return;
+  if (input->focused_surface) wlr_text_input_v3_send_leave(input);
+  if (surface && wl_resource_get_client(input->resource) == wl_resource_get_client(surface->resource))
+    wlr_text_input_v3_send_enter(input, surface);
+}
+static void text_input_focus(struct wl_listener *listener, void *data) {
+  GnosisCompositor *self = wl_container_of(listener, self, text_input_focus);
+  struct wlr_seat_keyboard_focus_change_event *event = data;
+  struct wlr_text_input_v3 *input;
+  wl_list_for_each(input, &self->text_inputs->text_inputs, link) {
+    gboolean held = FALSE;
+    View *view;
+    wl_list_for_each(view, &self->views, link)
+      if (!event->new_surface && view->caret_held && view->toplevel->base->surface == input->focused_surface) { held = TRUE; break; }
+    if (!held) enter_text_input(input, event->new_surface);
+  }
+}
+static void text_input_commit(struct wl_listener *listener, void *data) {
+  (void)listener; struct wlr_text_input_v3 *input = data;
+  GnosisCompositor *server = input->seat ? input->seat->data : NULL;
+  if (server && input->focused_surface) {
+    View *view;
+    wl_list_for_each(view, &server->views, link) {
+      if (view->toplevel->base->surface != input->focused_surface) continue;
+      if (input->current_enabled && input->current.cursor_rectangle.height > 0 && input->current.cursor_rectangle.width >= 0) {
+        view->caret = input->current.cursor_rectangle; view->caret_valid = TRUE;
+      }
+      break;
+    }
+  }
+  // Acknowledge all batches, including enable/disable transitions.
+  if (input->focused_surface) wlr_text_input_v3_send_done(input);
+}
+static void text_input_destroy(struct wl_listener *listener, void *data) {
+  (void)data; TextInput *watch = wl_container_of(listener, watch, destroy);
+  wl_list_remove(&watch->enable.link); wl_list_remove(&watch->commit.link);
+  wl_list_remove(&watch->disable.link); wl_list_remove(&watch->destroy.link); g_free(watch);
+}
+static void new_text_input(struct wl_listener *listener, void *data) {
+  GnosisCompositor *self = wl_container_of(listener, self, new_text_input);
+  TextInput *watch = g_new0(TextInput, 1); watch->input = data;
+  listen(&watch->input->events.enable, &watch->enable, text_input_commit);
+  listen(&watch->input->events.commit, &watch->commit, text_input_commit);
+  listen(&watch->input->events.disable, &watch->disable, text_input_commit);
+  listen(&watch->input->events.destroy, &watch->destroy, text_input_destroy);
+  enter_text_input(watch->input, self->seat->keyboard_state.focused_surface);
 }
 static void stop_capture(GnosisCompositorView *self) {
   struct wlr_pointer_constraint_v1 *constraint = self->constraint;
@@ -918,7 +977,7 @@ static void server_dispose(GObject *object) {
     if (self->dispatch) { g_source_remove(self->dispatch); self->dispatch = 0; }
     // These listeners belong to this server, not to the wlroots globals.
     // wlroots requires its public event lists to be empty during destruction.
-    struct wl_listener *listeners[] = {&self->new_surface, &self->new_toplevel, &self->new_popup, &self->new_constraint, &self->decoration, &self->request_drag, &self->request_cursor, &self->request_cursor_shape};
+    struct wl_listener *listeners[] = {&self->new_surface, &self->new_toplevel, &self->new_popup, &self->new_constraint, &self->decoration, &self->request_drag, &self->request_cursor, &self->request_cursor_shape, &self->new_text_input, &self->text_input_focus};
     for (guint i = 0; i < G_N_ELEMENTS(listeners); ++i) {
       if (listeners[i]->link.next) wl_list_remove(&listeners[i]->link);
       wl_list_init(&listeners[i]->link);
@@ -1047,6 +1106,11 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   wlr_output_layout_add(layout, self->output, 0, 0); wlr_output_create_global(self->output, self->display);
   wlr_xdg_output_manager_v1_create(self->display, layout);
   self->seat = wlr_seat_create(self->display, "Gnosis GTK seat");
+  self->seat->data = self;
+  self->text_inputs = wlr_text_input_manager_v3_create(self->display);
+  if (!self->text_inputs) goto failed;
+  listen(&self->text_inputs->events.text_input, &self->new_text_input, new_text_input);
+  listen(&self->seat->keyboard_state.events.focus_change, &self->text_input_focus, text_input_focus);
   listen(&self->seat->events.request_set_cursor, &self->request_cursor, request_cursor);
   struct wlr_cursor_shape_manager_v1 *cursor_shapes = wlr_cursor_shape_manager_v1_create(self->display, 1);
   listen(&cursor_shapes->events.request_set_shape, &self->request_cursor_shape, request_cursor_shape);
@@ -1125,4 +1189,39 @@ gboolean gnosis_compositor_view_edit(GnosisCompositorView *self, const char *com
 gboolean gnosis_compositor_view_context_position(GnosisCompositorView *self, double *x, double *y) {
   if (!self->context_time || g_get_monotonic_time() - self->context_time > 2 * G_USEC_PER_SEC) return FALSE;
   *x = self->context_x; *y = self->context_y; return TRUE;
+}
+gboolean gnosis_compositor_view_caret_rect(GnosisCompositorView *self, GdkRectangle *rect) {
+  if (!self->server || !self->active) return FALSE;
+  struct wlr_surface *surface = self->active->toplevel->base->surface;
+  struct wlr_box geometry = self->active->toplevel->base->geometry;
+  if (!surface->mapped || geometry.width <= 0 || geometry.height <= 0) return FALSE;
+  struct wlr_text_input_v3 *input;
+  wl_list_for_each(input, &self->server->text_inputs->text_inputs, link) {
+    if (input->focused_surface != surface || !input->current_enabled) continue;
+    // Re-enabling an unchanged editor need not resend its last reported caret.
+    if (!self->active->caret_valid) return FALSE;
+    const struct wlr_box *caret = &self->active->caret;
+    if (caret->height <= 0 || caret->width < 0) continue;
+    const double sx = (double)gtk_widget_get_width(GTK_WIDGET(self)) / geometry.width;
+    const double sy = (double)gtk_widget_get_height(GTK_WIDGET(self)) / geometry.height;
+    const double x = ((double)caret->x - geometry.x) * sx, y = ((double)caret->y - geometry.y) * sy;
+    const double width = caret->width * sx, height = caret->height * sy;
+    if (!isfinite(x) || !isfinite(y) || !isfinite(width) || !isfinite(height) ||
+        fabs(x) > G_MAXINT / 4 || fabs(y) > G_MAXINT / 4 || width > G_MAXINT / 4 || height > G_MAXINT / 4) return FALSE;
+    *rect = (GdkRectangle){(int)floor(x), (int)floor(y), MAX(1, (int)ceil(width)), MAX(1, (int)ceil(height))};
+    return TRUE;
+  }
+  return FALSE;
+}
+void gnosis_compositor_view_clear_caret(GnosisCompositorView *self) {
+  if (self->active) self->active->caret_valid = FALSE;
+}
+void gnosis_compositor_view_hold_caret(GnosisCompositorView *self, gboolean held) {
+  if (!self->active || !self->server) return;
+  self->active->caret_held = held;
+  if (held) return;
+  struct wlr_text_input_v3 *input;
+  wl_list_for_each(input, &self->server->text_inputs->text_inputs, link)
+    if (input->focused_surface == self->active->toplevel->base->surface)
+      enter_text_input(input, self->server->seat->keyboard_state.focused_surface);
 }

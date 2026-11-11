@@ -22,6 +22,9 @@ gboolean gnosis_compositor_view_has_surface(GnosisCompositorView *self);
 const char *gnosis_compositor_view_get_socket(GnosisCompositorView *self);
 gboolean gnosis_compositor_view_edit(GnosisCompositorView *self, const char *command);
 gboolean gnosis_compositor_view_context_position(GnosisCompositorView *self, double *x, double *y);
+gboolean gnosis_compositor_view_caret_rect(GnosisCompositorView *self, GdkRectangle *rect);
+void gnosis_compositor_view_clear_caret(GnosisCompositorView *self);
+void gnosis_compositor_view_hold_caret(GnosisCompositorView *self, gboolean held);
 void gnosis_compositor_view_release_buttons(GnosisCompositorView *self);
 void gnosis_compositor_drag_set_image(GdkDrag *drag, GdkTexture *image);
 G_END_DECLS

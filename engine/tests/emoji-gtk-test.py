@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='gnosis-emoji-') as directory, a.log.ope
         proc = subprocess.Popen(['dbus-run-session', '--config-file=' + str(config), '--', str(a.gnosis.resolve()),
                                  '--profile=' + str(root / 'profile'), f'http://127.0.0.1:{server.server_port}/'],
                                 env=env, stdout=log, stderr=log, start_new_session=True)
-        result = proc.wait(timeout=65)
+        result = proc.wait(timeout=100)
     finally:
         if proc:
             try:

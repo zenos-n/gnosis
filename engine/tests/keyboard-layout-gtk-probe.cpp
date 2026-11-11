@@ -41,7 +41,7 @@ static GVariant* call(const char*path,const char*iface,const char*method,GVarian
 static void key(int code,bool pressed){g_variant_unref(call(remote.c_str(),"org.gnome.Mutter.RemoteDesktop.Session","NotifyKeyboardKeycode",g_variant_new("(ub)",code,pressed)));}
 static void press(int code){actions.push_back([=]{key(code,true);});actions.push_back([=]{key(code,false);});}
 static void eval(const std::string&js){actions.push_back([js]{busy=true;page->command("Runtime.evaluate","{\"expression\":"+GnosisBrave::quote(js)+",\"returnByValue\":true}",[js](JsonObject*r,const std::string&e){busy=false;auto*v=r?json_object_get_object_member(r,"result"):nullptr;if(!e.empty()||!v||!json_object_get_boolean_member_with_default(v,"value",false)){if(v){auto*n=json_node_new(JSON_NODE_OBJECT);json_node_set_object(n,v);g_autofree char*s=json_to_string(n,false);g_printerr("KEYBOARD_LAYOUT_RESULT %s\n",s);json_node_free(n);}page->command("Runtime.evaluate",R"JSON({"expression":"JSON.stringify({value:document.querySelector('input').value,keys})","returnByValue":true})JSON",[js](JsonObject*r,const std::string&){auto*v=r?json_object_get_object_member(r,"result"):nullptr;if(v)g_printerr("INPUT_STATE %s\n",json_object_get_string_member_with_default(v,"value","unknown"));fail(js.c_str());});return;}g_print("KEYBOARD_LAYOUT_CHECK %s\n",js.c_str());});});}
-static gboolean tick(gpointer){if(busy)return G_SOURCE_CONTINUE;if(step==actions.size()){stop();page.reset();g_print("KEYBOARD_LAYOUT_PASS Polish AltGr, uppercase, pointer sync, layout groups, Ctrl shortcut\n");g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()),"quit",nullptr);return G_SOURCE_REMOVE;}actions[step++]();return G_SOURCE_CONTINUE;}
+static gboolean tick(gpointer){if(busy)return G_SOURCE_CONTINUE;if(step==actions.size()){stop();page.reset();g_print("KEYBOARD_LAYOUT_PASS Polish AltGr, uppercase, pointer sync, layout groups, dead-key composition, Ctrl shortcut\n");g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()),"quit",nullptr);return G_SOURCE_REMOVE;}actions[step++]();return G_SOURCE_CONTINUE;}
 static gboolean start(gpointer){
  auto*a=g_application_get_default();if(!GTK_IS_APPLICATION(a))return G_SOURCE_CONTINUE;window=gtk_application_get_active_window(GTK_APPLICATION(a));if(!window)return G_SOURCE_CONTINUE;
  auto*d=ADW_IS_APPLICATION_WINDOW(window)?adw_application_window_get_visible_dialog(ADW_APPLICATION_WINDOW(window)):nullptr;if(d&&ADW_IS_ALERT_DIALOG(d)){g_signal_emit_by_name(d,"response","no");adw_dialog_close(d);return G_SOURCE_CONTINUE;}
@@ -60,8 +60,9 @@ static gboolean start(gpointer){
  eval("document.querySelector('input').value===''");
  actions.push_back([]{key(56,true);});press(42);actions.push_back([]{key(56,false);}); // Alt+Shift -> German
  press(21);eval("document.querySelector('input').value==='z'");
+ press(13);press(18);eval("document.querySelector('input').value==='zé'"); // German dead acute + e
  actions.push_back([]{key(56,true);});press(42);actions.push_back([]{key(56,false);});
- actions.push_back([]{key(100,true);});press(38);actions.push_back([]{key(100,false);});eval("document.querySelector('input').value==='zł'");
+ actions.push_back([]{key(100,true);});press(38);actions.push_back([]{key(100,false);});eval("document.querySelector('input').value==='zéł'");
  g_timeout_add(150,tick,nullptr);return G_SOURCE_REMOVE;
 }
 __attribute__((constructor))static void init(){char exe[2048];auto n=readlink("/proc/self/exe",exe,sizeof(exe)-1);if(n<0)return;exe[n]=0;if(strstr(exe,"/.gnosis-wrapped"))g_timeout_add_seconds(2,start,nullptr);}

@@ -6,7 +6,6 @@
   struct FrameSession {
     std::weak_ptr<Page> owner;
     std::string parent;
-    std::string root_frame;
     std::map<int,int> contexts;
     std::set<std::string> frames;
     guint resume_timer = 0;
@@ -97,7 +96,7 @@
         return true;
       }
       if (frame_sessions.contains(child)) return true;
-      auto& frame = frame_sessions[child]; frame.owner = page; frame.parent = source; frame.root_frame = text(info,"targetId");
+      auto& frame = frame_sessions[child]; frame.owner = page; frame.parent = source;
       struct Resume { std::weak_ptr<Process> process; std::string source; };
       frame.resume_timer = g_timeout_add_full(G_PRIORITY_DEFAULT,5000,+[](gpointer data)->gboolean {
         auto* pending = static_cast<Resume*>(data);

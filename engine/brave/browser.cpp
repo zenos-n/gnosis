@@ -532,6 +532,7 @@ public:
       "--password-store=basic", "--window-size=1000,700", "--window-position=-16000,-16000"};
     if (!automation_mode) args.push_back("--disable-blink-features=AutomationControlled");
     if (composited()) args.push_back("--overscroll-history-navigation=0");
+    if (composited()) { args.push_back("--enable-wayland-ime"); args.push_back("--wayland-text-input-version=3"); }
     // Consume the nested compositor's actual frame callbacks with upstream
     // in-flight backpressure. Uncapped rendering is only a diagnostic override.
     if (composited() && g_strcmp0(g_getenv("GNOSIS_UNCAP_FRAMES"), "1") == 0)
@@ -1844,6 +1845,7 @@ void Page::offer_http_retry(const std::string& address) {
     }, new Retry{weak_from_this(), "http://" + address.substr(8), state_->navigation_generation});
 }
 void Page::navigate(const std::string& value) {
+  if (state_->surface) gnosis_compositor_view_clear_caret(GNOSIS_COMPOSITOR_VIEW(state_->surface));
   dismiss_emoji_picker();
   remember_navigation_preview();
   dismiss_http_retry();
@@ -2204,6 +2206,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
       }
       stop_find();
       cancel_close();
+      if (state_->surface) gnosis_compositor_view_clear_caret(GNOSIS_COMPOSITOR_VIEW(state_->surface));
       dismiss_translation();
       dismiss_password_manager();
       dismiss_authenticator(true);
