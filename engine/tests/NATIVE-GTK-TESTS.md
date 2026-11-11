@@ -37,7 +37,11 @@ Compile with the usual preload flags, `-Iengine/brave`, and
 with `--gnosis "$GNOSIS" --probe "$PROBE" --xvfb "$XVFB"`. It checks Unicode
 selection replacement and undo, textareas/contenteditable/shadow DOM, same-origin
 and cross-process frames, Escape, changed-field/tab/navigation cancellation,
-read-only controls, and the unchanged native GTK entry shortcut.
+read-only controls, and the unchanged native GTK entry shortcut. It also checks
+focused-field anchor bounds through local/cross-process frames and page zoom,
+with cold/warm shortcut-to-visible-popup timing below 400 ms. Optional
+`--capture-tool /path/to/import` captures the private display to
+`/tmp/gnosis-emoji-anchor.png`.
 
 `web-app-external-gtk-test.py` uses `web-app-external-gtk-probe.cpp` with the same
 compile flags and `GNOSIS_XDOTOOL`/`--gnosis`/`--probe`/`--xvfb` arguments.

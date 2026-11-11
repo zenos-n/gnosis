@@ -21,11 +21,11 @@ resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 class Fixture(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = b'<!doctype html><title>Emoji input fixture</title>\n<input id=input value="hello world"><textarea id=textarea>a\nb</textarea><div id=editable contenteditable>hello</div>\n<input id=readonly readonly><div id=shadow></div>\n<iframe srcdoc="<input>"></iframe>\n<script>shadow.attachShadow({mode:\'open\'}).innerHTML=\'<input>\';</script>'
+        body = b'<!doctype html><title>Emoji input fixture</title>\n<style>body{margin:24px 40px}body>input,textarea,#editable,#shadow,iframe{display:block;margin:0 0 20px}#input{width:320px;height:30px}#editable{width:400px;border:1px solid;padding:6px}iframe{width:310px;height:60px}</style><input id=input value="hello world"><textarea id=textarea>a\nb</textarea><div id=editable contenteditable>hello</div>\n<input id=readonly readonly><div id=shadow></div>\n<iframe srcdoc="<input>"></iframe>\n<script>shadow.attachShadow({mode:\'open\'}).innerHTML=\'<input>\';</script>'
         if self.path == '/frame':
-            body = b'<!doctype html><input><script>addEventListener("message", () => document.querySelector("input").focus()); document.querySelector("input").addEventListener("input", event => parent.postMessage({emoji:event.target.value}, "*"));</script>'
+            body = b'<!doctype html><input><script>addEventListener("message", () => { const i=document.querySelector("input"); i.focus(); const r=i.getBoundingClientRect(); parent.postMessage({bounds:[r.x,r.y,r.width,r.height]}, "*"); }); document.querySelector("input").addEventListener("input", event => parent.postMessage({emoji:event.target.value}, "*"));</script>'
         else:
-            body += f'<iframe id=cross src="http://localhost:{self.server.server_port}/frame"></iframe><script>addEventListener("message",e=>window.crossValue=e.data.emoji)</script>'.encode()
+            body += f'<iframe id=cross src="http://localhost:{self.server.server_port}/frame"></iframe><script>addEventListener("message",e=>{{if(e.data.emoji!==undefined)window.crossValue=e.data.emoji;if(e.data.bounds)window.crossBounds=e.data.bounds}})</script>'.encode()
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
