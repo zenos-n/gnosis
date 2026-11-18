@@ -87,6 +87,9 @@ with tempfile.TemporaryDirectory(prefix='gnosis-extension-probe-') as profile:
   ubo=call('Extensions.loadUnpacked',{'path':str(args.ublock.resolve())})['id']
   actual=management('gnosisExtensions.inventory()');entry=next(x for x in actual if x['id']==ubo)
   assert entry['enabled'] and entry['name']=='uBlock Origin',entry
+  manifest=json.loads((args.ublock/'manifest.json').read_text())
+  assert manifest['manifest_version']==2 and entry['version']==manifest['version'],entry
+  print('FULL_UBLOCK_VERSION',entry['version'],flush=True)
   call('Page.navigate',{'url':f'chrome-extension://{ubo}/dashboard.html'},session)
   deadline=time.monotonic()+20
   while time.monotonic()<deadline:
@@ -106,6 +109,41 @@ with tempfile.TemporaryDirectory(prefix='gnosis-extension-probe-') as profile:
   frame=call('Runtime.evaluate',{'expression':"getComputedStyle(document.querySelector('iframe').contentDocument.querySelector('.gnosis-frame-ad')).display",'returnByValue':True},session)['result'].get('value')
   assert frame=='none',frame
   print('FULL_UBLOCK_PASS native MV2, network blocked before server, cosmetic main/frame, real scriptlet',flush=True)
+  # GHSA-cmqw-9r2w-6wv2: exercise the real picker page and transferred port.
+  # The valid-token control ensures rejection is not just a broken/unloaded UI.
+  background=next(t for t in call('Target.getTargets')['targetInfos'] if t['type']=='background_page' and t['url'].startswith(f'chrome-extension://{ubo}/'))
+  background_session=call('Target.attachToTarget',{'targetId':background['targetId'],'flatten':True})['sessionId']
+  for password in ['missing','wrong','valid']:
+   # Grant a valid resource URL to test the picker-token defense independently.
+   secret=call('Runtime.evaluate',{'expression':'vAPI.warSecret.short()','returnByValue':True},background_session)['result'].get('value')
+   assert isinstance(secret,str) and secret
+   picker=call('Target.createTarget',{'url':f'chrome-extension://{ubo}/web_accessible_resources/epicker-ui.html?secret={secret}'})['targetId']
+   picker_session=call('Target.attachToTarget',{'targetId':picker,'flatten':True})['sessionId']
+   call('Runtime.enable',{},picker_session)
+   deadline=time.monotonic()+10
+   ready=False
+   while time.monotonic()<deadline:
+    ready=call('Runtime.evaluate',{'expression':"typeof globalThis.vAPI?.messaging?.send==='function' && document.readyState==='complete'",'returnByValue':True},picker_session)['result'].get('value')
+    if ready:break
+    time.sleep(.1)
+   assert ready,'element picker did not finish loading'
+   expression="""(async()=>{
+    const message={what:'epickerStart'}, mode=MODE;
+    if(mode==='wrong')message.password='gnosis-invalid-picker-token';
+    if(mode==='valid')message.password=await vAPI.messaging.send('elementPicker',{what:'elementPickerPassword'});
+    return new Promise(resolve=>{
+     const channel=new MessageChannel(), replies=[];
+     channel.port1.onmessage=event=>replies.push(event.data.what);
+     window.postMessage(message,'*',[channel.port2]);
+     setTimeout(()=>{channel.port1.close();resolve(replies)},700);
+    });
+   })()""".replace('MODE',json.dumps(password))
+   result=call('Runtime.evaluate',{'expression':expression,'awaitPromise':True,'returnByValue':True},picker_session)
+   assert 'exceptionDetails' not in result,result
+   messages=result['result'].get('value')
+   assert isinstance(messages,list) and ('start' in messages if password=='valid' else not messages),(password,messages)
+   call('Target.closeTarget',{'targetId':picker})
+  print('FULL_UBLOCK_PICKER_AUTH_PASS missing/wrong tokens rejected; valid token accepted',flush=True)
   for enabled in [False,True]:
    actual=management('gnosisExtensions.setEnabled('+json.dumps(ubo)+','+str(enabled).lower()+')')
    assert next(x for x in actual if x['id']==ubo)['enabled']==enabled

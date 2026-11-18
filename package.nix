@@ -56,14 +56,26 @@ let
       platforms = [ system ];
     };
   };
-  ublock = pkgs.stdenvNoCC.mkDerivation {
+  ublock = pkgs.stdenvNoCC.mkDerivation rec {
     pname = "ublock-origin";
-    version = "1.75.0";
+    version = "1.76.4";
     src = pkgs.fetchurl {
-      url = "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip";
-      hash = "sha256-OTz5VwnRB01AIpcOkBTkNDlcU6giOH8eJfQ76Xz0tYI=";
+      url = "https://github.com/gorhill/uBlock/releases/download/${version}/uBlock0_${version}.chromium.zip";
+      hash = "sha256-Sxsn7YLnNNUIrm0lWTPDNPYvJW6KiuzpJyS4JoKOPV8=";
     };
-    nativeBuildInputs = [ pkgs.unzip ];
+    nativeBuildInputs = [ pkgs.unzip pkgs.python3 ];
+    doCheck = true;
+    checkPhase = ''
+      python3 - <<'PY'
+      import json
+      with open('manifest.json') as source:
+          manifest = json.load(source)
+      assert manifest['name'] == 'uBlock Origin' and manifest['manifest_version'] == 2
+      assert manifest['version'] == '${version}'
+      # GHSA-cmqw-9r2w-6wv2 plus the subsequent security fixes.
+      assert tuple(map(int, manifest['version'].split('.'))) >= (1, 76, 4)
+      PY
+    '';
     dontConfigure = true;
     dontBuild = true;
     installPhase = "mkdir -p $out; cp -r . $out/";

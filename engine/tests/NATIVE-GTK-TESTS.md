@@ -10,6 +10,13 @@ python3 engine/tools/check-context-menu-media.py --browser "$BRAVE"
 python3 engine/tools/check-full-ublock-native.py --browser "$BRAVE" --ublock "$UBLOCK"
 ```
 
+The full uBlock check verifies the loaded native version against the packaged
+Manifest V2 archive. It also exercises the actual element picker's transferred
+message port: missing and incorrect tokens must be rejected, while the valid
+extension-issued token must start the picker (GHSA-cmqw-9r2w-6wv2). This is an
+isolated component regression, not a full website exploit. Network, cosmetic,
+scriptlet and enable/disable checks still run against the real extension.
+
 `brave-private-profile-test` and `brave-bundled-extension-test` are Meson tests
 when `unit_tests` is enabled. They exercise owned-directory cleanup without
 following symlinks, stable extension identity, updates, rollback, recovery,
