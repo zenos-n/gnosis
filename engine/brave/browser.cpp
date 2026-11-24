@@ -181,6 +181,8 @@ struct Page::State {
   ::Window parent = 0, child = 0, container = 0;
   int window = -1, width = 0, height = 0;
   int native_tab = -1;
+  bool native_tab_pending = false;
+  bool adopted_popup = false, popup_identity_pending = false;
   bool extension_popup = false;
   int popup_owner_tab_id = -1;
   int popup_width = 0, popup_height = 0;
@@ -271,6 +273,9 @@ public:
   std::map<std::string, std::weak_ptr<Page>> pages, targets, sessions;
   std::vector<std::weak_ptr<Page>> pending_opens;
   std::map<int,std::weak_ptr<Page>> zoom_tabs;
+  struct NavigationTarget { int source, tab; std::string uri; };
+  std::deque<NavigationTarget> pending_navigation;
+  unsigned pending_adoptions = 0;
   std::map<std::string, std::weak_ptr<Page>> frame_owners;
   std::map<std::string, DownloadProgress> downloads;
   std::set<std::string> download_guids;
@@ -457,7 +462,8 @@ public:
         }
         s.requested = page->uri;
         s.attached = s.protocol_ready = s.native_destroyed = false;
-        s.window = s.native_tab = -1; s.child = 0;
+        s.window = s.native_tab = -1; s.native_tab_pending = false; s.child = 0;
+        s.adopted_popup = s.popup_identity_pending = false;
         s.history_current = s.history_back = s.history_forward = -1; s.history_traversal = false; s.navigation_previews.clear();
         page->set_vim_context(0); s.main_frame.clear(); s.context_id = 0; s.context_unique.clear(); s.menu_contexts.clear(); s.menu_frames.clear(); s.menu_sessions.clear(); s.metadata_contexts.clear(); s.metadata_unique.clear();
         s.zoom_busy = false; s.zoom_pending = true; ++s.zoom_revision;
@@ -914,6 +920,26 @@ public:
         } else reply(result, "");
       });
   }
+  void route_navigation(int source, int tab, const std::string& uri) {
+    if (tab < 0 || tab == source || !(uri.starts_with("http://") || uri.starts_with("https://"))) return;
+    if (pending_adoptions) { pending_navigation.push_back({source, tab, uri}); return; }
+    auto adopted = zoom_tabs.find(tab);
+    if (adopted != zoom_tabs.end()) if (auto page = adopted->second.lock(); page && page->state_->adopted_popup) return;
+    auto found = zoom_tabs.find(source);
+    if (found == zoom_tabs.end()) return;
+    if (auto page = found->second.lock(); page && !page->is_closed() && page->open_uri && page->open_uri(uri)) {
+      command("Runtime.evaluate", "{\"expression\":" + quote("chrome.tabs.remove(" + std::to_string(tab) + ").catch(()=>{})") + "}", integration_session);
+      g_message("Brave link tab routed into the GTK shell");
+    }
+  }
+  void finish_adoption(bool success) {
+    if (pending_adoptions) --pending_adoptions;
+    // Never replace an original popup after its attachment has failed.
+    if (!success) pending_navigation.clear();
+    if (pending_adoptions) return;
+    auto pending = std::move(pending_navigation); pending_navigation.clear();
+    for (const auto& item : pending) route_navigation(item.source, item.tab, item.uri);
+  }
   void discovered(JsonObject* info) {
     if (!integration_ready && !integration_connecting && !integration_id.empty() &&
         std::string(text(info, "type")) == "service_worker" &&
@@ -934,6 +960,7 @@ public:
     }
     if (strcmp(text(info, "type"), "page")) return;
     const std::string uri = text(info, "url");
+    if (targets.contains(text(info, "targetId"))) return;
     for (auto& [token, weak] : pages) if (auto page = weak.lock()) {
       if (!page->target.empty() || (page->state_->bootstrap != uri &&
           std::string(text(info, "title")) != "GnosisTab-" + token)) continue;
@@ -945,6 +972,14 @@ public:
         page->session = text(result, "sessionId"); sessions[page->session] = page; page->attach();
       });
       return;
+    }
+    auto opener = targets.find(text(info, "openerId"));
+    if (opener == targets.end() || !(uri.empty() || uri == "about:blank" || uri.starts_with("http://") || uri.starts_with("https://"))) return;
+    auto parent = opener->second.lock();
+    if (!parent || parent->is_closed() || parent->state_->extension_popup || !parent->create_popup) return;
+    if (auto child = parent->create_popup(uri.empty() ? "about:blank" : uri)) {
+      ++pending_adoptions;
+      child->adopt(parent, text(info, "targetId"), uri.empty() ? "about:blank" : uri);
     }
   }
   void read() {
@@ -1057,20 +1092,13 @@ public:
               const int source = json_object_get_int_member_with_default(created,"sourceTabId",-1);
               const int tab = json_object_get_int_member_with_default(created,"tabId",-1);
               const std::string uri = text(created,"url");
-              auto found = zoom_tabs.find(source);
-              if (tab >= 0 && tab != source && found != zoom_tabs.end() &&
-                  (uri.starts_with("http://") || uri.starts_with("https://"))) {
-                if (auto page = found->second.lock(); page && !page->is_closed() && page->open_uri && page->open_uri(uri)) {
-                  command("Runtime.evaluate", "{\"expression\":" + quote("chrome.tabs.remove(" + std::to_string(tab) + ").catch(()=>{})") + "}", integration_session);
-                  g_message("Brave link tab routed into the GTK shell");
-                }
-              }
+              route_navigation(source, tab, uri);
             }
           } else if (method == "Target.targetCreated") discovered(object(params, "targetInfo"));
           else if (method == "Target.targetInfoChanged") {
             auto* info = object(params, "targetInfo"); discovered(info); auto found = targets.find(text(info, "targetId"));
             if (found != targets.end()) if (auto page = found->second.lock()) {
-              if (page->state_->attached) {
+              if (page->state_->attached || page->state_->adopted_popup) {
                 page->uri = page->canonical_uri(text(info, "url"));
                 if (page->state_->document_title_uri != page->uri) {
                   const std::string candidate = text(info, "title");
@@ -1567,11 +1595,51 @@ void Page::adopt_surface(GtkWidget* widget) {
   gtk_box_append(GTK_BOX(state_->content), widget);
   gtk_widget_set_visible(widget, state_->mapped);
 }
+void Page::adopt(const std::shared_ptr<Page>& parent, const std::string& id, const std::string& address) {
+  auto& s = *state_;
+  s.process = parent->state_->process; s.started = true; s.adopted_popup = true; s.popup_identity_pending = true;
+  uri = s.requested = address; target = id; loading = true; progress = .1;
+  s.process->pages[s.token] = shared_from_this(); s.process->targets[target] = shared_from_this();
+  if (composited()) adopt_surface(gnosis_compositor_view_new_for_server(s.process->compositor, id.c_str()));
+  else {
+    s.display = XOpenDisplay(nullptr);
+    s.timer = g_timeout_add(50, +[](gpointer data) -> gboolean { static_cast<Page*>(data)->layout(); return G_SOURCE_CONTINUE; }, this);
+  }
+  if (changed) changed();
+  auto weak = weak_from_this();
+  s.process->command("Target.attachToTarget", "{\"targetId\":" + quote(target) + ",\"flatten\":true}", "",
+    [weak](JsonObject* result, const std::string& error) {
+      auto self = weak.lock(); if (!self || self->is_closed()) return;
+      if (!result) {
+        self->state_->popup_identity_pending = false; self->state_->process->finish_adoption(false);
+        if (self->failed) self->failed("Could not attach the original browser popup: " + error);
+        return;
+      }
+      self->session = text(result, "sessionId"); self->state_->process->sessions[self->session] = self;
+      self->attach(); self->claim_popup_surface();
+      if (!composited() && self->popup_ready) self->popup_ready();
+      if (self->changed) self->changed();
+    });
+}
+void Page::claim_popup_surface() {
+  auto& s = *state_;
+  if (!s.adopted_popup || s.attached || s.disposed || session.empty()) return;
+  // Tag the existing native window without navigating its browsing context.
+  const std::string marker = "GnosisTab-" + target;
+  command("Runtime.evaluate", "{\"expression\":" + quote("(()=>{const key=" + quote(marker) +
+    ";if(!Object.hasOwn(globalThis,key)||document.title!==key)Object.defineProperty(globalThis,key,{value:document.title,configurable:true});document.title=key})()") + "}");
+}
+void Page::restore_popup_title() {
+  command("Runtime.evaluate", "{\"expression\":" + quote("(()=>{const key=" + quote("GnosisTab-" + target) +
+    ";const title=globalThis[key];delete globalThis[key];if(document.title===key&&typeof title==='string')document.title=title})()") + "}");
+}
 void Page::surface_ready() {
   auto& s = *state_;
   if (s.disposed || s.attached || !s.protocol_ready || !s.process->integration_ready || s.process->debug_startup_pending || session.empty() || !s.surface ||
       !gnosis_compositor_view_has_surface(GNOSIS_COMPOSITOR_VIEW(s.surface))) return;
-  s.attached = true; navigate(s.requested);
+  s.attached = true; resolve_native_tab();
+  if (s.adopted_popup) { restore_popup_title(); if (popup_ready) popup_ready(); }
+  else navigate(s.requested);
   g_message("Brave composited tab ready: target=%s", target.c_str());
 }
 void Page::command(const std::string& method, const std::string& params, Reply reply) {
@@ -1697,7 +1765,7 @@ void Page::attach() {
     command("Page.addScriptToEvaluateOnNewDocument", "{\"worldName\":\"GnosisContextMenu\",\"source\":" + quote(menu_script) + "}");
   else if (adapter_enabled("context-menu")) g_warning("The native context-menu adapter could not be loaded");
   command("Runtime.addBinding", "{\"name\":\"__gnosisDocumentMetadata\",\"executionContextName\":\"GnosisDocumentMetadata\"}");
-  if (adapter_enabled("document-metadata")) command("Page.addScriptToEvaluateOnNewDocument", "{\"worldName\":\"GnosisDocumentMetadata\",\"source\":" + quote(document_adapter_source()) + "}");
+  if (adapter_enabled("document-metadata")) command("Page.addScriptToEvaluateOnNewDocument", "{\"worldName\":\"GnosisDocumentMetadata\",\"source\":" + quote(document_adapter_source()) + ",\"runImmediately\":" + (state_->adopted_popup ? "true" : "false") + "}");
   if (state_->extension_popup && adapter_enabled("popup-sizing")) {
     g_autofree char* popup_path = g_build_filename(GNOSIS_NATIVE_INTEGRATION_DIR, "popup-size.js", nullptr);
     g_autofree char* popup_script = nullptr;
@@ -1722,6 +1790,19 @@ void Page::attach() {
     auto* frame = object(object(result, "frameTree"), "frame");
     if (self && frame) {
       self->state_->main_frame = text(frame, "id");
+      if (self->state_->adopted_popup) {
+        self->uri = self->state_->requested = self->canonical_uri(std::string(text(frame,"url")) + text(frame,"urlFragment"));
+        self->command("Runtime.evaluate", "{\"expression\":\"document.readyState==='complete'\",\"returnByValue\":true}",
+          [weak, expected = self->uri, generation = self->state_->navigation_generation](JsonObject* result, const std::string&) {
+            auto page = weak.lock(); if (!page || page->is_closed() || page->uri != expected || page->state_->navigation_generation != generation) return;
+            auto* value = object(result,"result");
+            if (value && json_object_get_boolean_member_with_default(value,"value",false)) {
+              page->loading = false; page->progress = 1;
+              if (page->load_finished) page->load_finished(page->state_->response_status);
+              if (page->changed) page->changed();
+            }
+          });
+      }
       auto page = self;
       std::function<void(JsonObject*)> register_frames = [&](JsonObject* tree) {
         auto* item = object(tree, "frame");
@@ -1734,13 +1815,20 @@ void Page::attach() {
       };
       register_frames(object(result, "frameTree"));
       self->state_->protocol_ready = true;
+      self->claim_popup_surface();
       if (composited()) self->surface_ready();
     }
   });
-  state_->process->command("Browser.getWindowForTarget", "{\"targetId\":" + quote(target) + "}", "", [weak](JsonObject* result, const std::string&) {
-    if (auto self = weak.lock(); self && result) {
-      self->state_->window = json_object_get_int_member(result, "windowId"); self->apply_zoom();
+  state_->process->command("Browser.getWindowForTarget", "{\"targetId\":" + quote(target) + "}", "", [weak](JsonObject* result, const std::string& error) {
+    auto self = weak.lock(); if (!self || self->is_closed()) return;
+    if (!result) {
+      if (self->state_->popup_identity_pending) {
+        self->state_->popup_identity_pending = false; self->state_->process->finish_adoption(false);
+        if (self->failed) self->failed("Could not locate the original browser popup: " + error);
+      }
+      return;
     }
+    self->state_->window = json_object_get_int_member(result, "windowId"); self->resolve_native_tab(); self->apply_zoom();
   });
 }
 namespace {
@@ -1867,6 +1955,8 @@ void Page::navigate(const std::string& value) {
   command("Page.navigate", "{\"url\":" + quote(transport_uri(state_->internal_origin, value)) + "}");
 }
 std::string Page::canonical_uri(const std::string& value) const {
+  // A newly created popup can still have an empty initial document URL.
+  if (value.empty()) return "about:blank";
   for (const char* scheme : {"ephy-about", "ephy-resource", "ephy-reader"}) {
     std::string prefix = state_->internal_origin + '/' + scheme + '/';
     if (value.starts_with(prefix)) return std::string(scheme) + ':' + value.substr(prefix.size());
@@ -1983,6 +2073,8 @@ void Page::reload(bool bypass) { command("Page.reload", bypass ? "{\"ignoreCache
 void Page::stop() { command("Page.stopLoading"); }
 void Page::handle(const std::string& method, JsonObject* params, bool frame_event) {
   if (state_->disposed || !params) return;
+  // A popup can redirect before attachment, replacing the context/title we tagged.
+  if (method == "Page.domContentEventFired" && !frame_event) claim_popup_surface();
   if (method == "Page.frameAttached") {
     if (state_->close_approved || state_->close_callback) cancel_close();
     state_->process->frame_owners[text(params, "frameId")] = shared_from_this();
@@ -2034,6 +2126,8 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
     }
   } else if (method == "Runtime.executionContextCreated") {
     auto* context = object(params, "context"); auto* aux = object(context, "auxData");
+    if (!frame_event && aux && json_object_get_boolean_member_with_default(aux, "isDefault", false) &&
+        std::string(text(aux, "frameId")) == state_->main_frame) claim_popup_surface();
     if (context && aux && std::string(text(context, "name")) == "GnosisContextMenu" &&
         !std::string(text(context, "uniqueId")).empty()) {
       state_->menu_contexts[json_object_get_int_member(context, "id")] = text(context, "uniqueId");
@@ -2189,7 +2283,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
              std::string(text(params, "requestId")) == state_->document_request &&
              std::string(text(params, "errorText")) == "net::ERR_SSL_PROTOCOL_ERROR") {
     offer_http_retry(state_->document_request_url);
-  } else if (method == "Page.frameStartedLoading" && state_->attached &&
+  } else if (method == "Page.frameStartedLoading" && (state_->attached || state_->adopted_popup) &&
              std::string(text(params, "frameId")) == state_->main_frame) {
     if (!loading) remember_navigation_preview();
     loading = true; progress = 0.1; state_->response_status = 0;
@@ -2204,6 +2298,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
         if (event) event(method, params);
         return;
       }
+      claim_popup_surface();
       stop_find();
       cancel_close();
       if (state_->surface) gnosis_compositor_view_clear_caret(GNOSIS_COMPOSITOR_VIEW(state_->surface));
@@ -2214,7 +2309,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
       g_clear_object(&state_->certificate); state_->security_state.clear(); state_->tls_errors = GTlsCertificateFlags(0);
       state_->main_frame = text(frame, "id");
       state_->context_id = 0; state_->context_unique.clear();
-      if (state_->attached) {
+      if (state_->attached || state_->adopted_popup) {
         uri = canonical_uri(std::string(text(frame, "url")) + text(frame, "urlFragment")); state_->requested = uri; progress = loading ? 0.1 : 1;
         const std::string loader = text(frame, "loaderId");
         const bool restored = state_->internal_loaders.contains(loader) && state_->internal_loaders[loader] == uri;
@@ -2242,7 +2337,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
     uri = canonical_uri(text(params, "url")); refresh_history(true); if (changed) changed();
     if (state_->surface) gnosis_compositor_view_swipe_ready(GNOSIS_COMPOSITOR_VIEW(state_->surface));
     request_favicon();
-  } else if (method == "Page.frameStoppedLoading" && state_->attached &&
+  } else if (method == "Page.frameStoppedLoading" && (state_->attached || state_->adopted_popup) &&
              std::string(text(params, "frameId")) == state_->main_frame) {
     // DOM load events do not run again for back/forward-cache restores, and
     // aborted navigations may never dispatch one. Track the frame's actual
@@ -2320,7 +2415,7 @@ void Page::layout() {
   ::Window parent = gdk_x11_surface_get_xid(surface);
   if (s.parent != parent) { s.parent = parent; if (s.container) XReparentWindow(s.display, s.container, parent, 0, 0); }
   if (!s.child) {
-    s.child = find_window(s.display, DefaultRootWindow(s.display), s.process->window_class, s.token);
+    s.child = find_window(s.display, DefaultRootWindow(s.display), s.process->window_class, s.adopted_popup ? target : s.token);
     if (!s.child) return;
     XWithdrawWindow(s.display, s.child, DefaultScreen(s.display)); XUnmapWindow(s.display, s.child); XSync(s.display, false);
     s.withdrawn_until = g_get_monotonic_time() + 300000; return;
@@ -2345,7 +2440,8 @@ void Page::layout() {
     // A synchronous passive grab performs click-to-focus, then replays the actual
     // pointer event to Brave. It does not emulate mouse buttons or keyboard text.
     XGrabButton(s.display, Button1, AnyModifier, s.child, false, ButtonPressMask, GrabModeSync, GrabModeAsync, None, None);
-    s.attached = true; navigate(s.requested);
+    s.attached = true; resolve_native_tab();
+    if (s.adopted_popup) restore_popup_title(); else navigate(s.requested);
     g_message("Brave native tab embedded: target=%s parent=%lu container=%lu child=%lu", target.c_str(), s.parent, s.container, s.child);
   }
   const bool mapped = s.mapped && gtk_widget_get_mapped(s.content);
@@ -3277,6 +3373,30 @@ void Page::receive_zoom(double factor) {
   s.zoom_requested = s.zoom_applied = factor;
   if (zoom_changed) zoom_changed(factor);
 }
+void Page::resolve_native_tab() {
+  auto& s = *state_;
+  if (s.disposed || s.native_tab >= 0 || s.native_tab_pending || s.window < 0 || !s.process->integration_ready) return;
+  s.native_tab_pending = true;
+  const int window = s.window;
+  // Middle-click and native extension services need this identity while the
+  // document is still loading. Resolving it must not wait for post-load zoom.
+  const std::string script = "(async()=>{const tabs=await chrome.tabs.query({windowId:" + std::to_string(window) +
+    "});if(tabs.length!==1)throw Error('The native browser window has no unique tab');return tabs[0].id;})()";
+  s.process->command("Runtime.evaluate", "{\"expression\":" + quote(script) + ",\"awaitPromise\":true,\"returnByValue\":true}",
+    s.process->integration_session, [weak = weak_from_this(), window](JsonObject* result, const std::string& error) {
+      auto self = weak.lock(); if (!self || self->is_closed() || self->state_->window != window) return;
+      auto& s = *self->state_; s.native_tab_pending = false;
+      auto* value = object(result, "result");
+      const int tab = value ? json_object_get_int_member_with_default(value, "value", -1) : -1;
+      if (tab < 0 || object(result, "exceptionDetails")) {
+        g_warning("Native Brave tab lookup failed: %s", error.empty() ? "No unique native tab" : error.c_str());
+        if (s.popup_identity_pending) { s.popup_identity_pending = false; s.process->finish_adoption(false); }
+        return;
+      }
+      s.native_tab = tab; s.process->zoom_tabs[tab] = self;
+      if (s.popup_identity_pending) { s.popup_identity_pending = false; s.process->finish_adoption(true); }
+    });
+}
 void Page::apply_zoom() {
   auto& s = *state_;
   if (s.disposed || loading || s.zoom_busy || !s.zoom_pending || !s.attached || s.window < 0 || !s.process->integration_ready) return;
@@ -3678,6 +3798,7 @@ void Page::close() {
   }
   if (s.process) s.process->forget_frames(this);
   s.disposed = true;
+  if (s.popup_identity_pending) { s.popup_identity_pending = false; s.process->finish_adoption(false); }
   for (auto& signal : s.theme_signals) {
     if (signal) g_signal_handler_disconnect(adw_style_manager_get_default(), signal);
     signal = 0;
@@ -3686,14 +3807,14 @@ void Page::close() {
   if (s.process && s.native_tab >= 0) s.process->zoom_tabs.erase(s.native_tab);
   dismiss_context_menu();
   if (s.keys) { gtk_widget_remove_controller(s.content, s.keys); s.keys = nullptr; }
-  changed = {}; closed = {}; failed = {}; navigation_started = {}; open_uri = {}; load_finished = {}; tls_changed = {}; fullscreen_changed = {}; zoom_changed = {}; favicon_changed = {}; event = {};
+  changed = {}; closed = {}; failed = {}; navigation_started = {}; open_uri = {}; create_popup = {}; popup_ready = {}; load_finished = {}; tls_changed = {}; fullscreen_changed = {}; zoom_changed = {}; favicon_changed = {}; event = {};
   popup_size_changed = {};
   if (s.timer) { g_source_remove(s.timer); s.timer = 0; }
   if (s.surface) {
     g_signal_handlers_disconnect_by_data(s.surface, this);
     // Action popups have a document observer and a short, owner-scoped life.
     // Never recycle their WebContents into another extension or browser tab.
-    const bool keep = !approved_close && !s.extension_popup && !s.ephemeral && s.process && !s.process->closing && !s.native_destroyed && !target.empty() && !session.empty() && s.process->parked.empty();
+    const bool keep = !approved_close && !s.adopted_popup && !s.extension_popup && !s.ephemeral && s.process && !s.process->closing && !s.native_destroyed && !target.empty() && !session.empty() && s.process->parked.empty();
     if (keep) {
       g_object_ref(s.surface);
       s.process->command("Page.stopLoading", "{}", session);
@@ -3718,7 +3839,7 @@ void Page::close() {
   }
     return;
   }
-  const bool park = s.process && !s.process->closing && !s.native_destroyed && s.display && s.child && !target.empty() && !session.empty();
+  const bool park = !s.adopted_popup && s.process && !s.process->closing && !s.native_destroyed && s.display && s.child && !target.empty() && !session.empty();
   if (park) {
     XUnmapWindow(s.display, s.child);
     XReparentWindow(s.display, s.child, DefaultRootWindow(s.display), 0, 0);

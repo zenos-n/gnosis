@@ -49,6 +49,8 @@ public:
   std::function<void(const std::string&)> failed;
   std::function<void(const std::string&)> navigation_started;
   std::function<bool(const std::string&)> open_uri;
+  std::function<std::shared_ptr<Page>(const std::string&)> create_popup;
+  std::function<void()> popup_ready;
   std::function<void(int)> load_finished;
   std::function<void(const std::string&, JsonObject*)> event;
   std::function<void(const std::string&, bool, ResourceReply)> internal_resource;
@@ -97,6 +99,9 @@ private:
   struct State;
   std::unique_ptr<State> state_;
   explicit Page(GtkWidget*, bool);
+  void adopt(const std::shared_ptr<Page>&, const std::string&, const std::string&);
+  void claim_popup_surface();
+  void restore_popup_title();
   void attach(); void handle(const std::string&, JsonObject*, bool frame_event = false); void layout();
   void adopt_surface(GtkWidget*); void surface_ready();
   void update_portal_parent();
@@ -124,6 +129,7 @@ private:
   void dismiss_vim_commands();
   void execute_vim_command(const std::string& command);
   void request_favicon();
+  void resolve_native_tab();
   void apply_zoom();
   void receive_zoom(double);
   void dismiss_password_manager();

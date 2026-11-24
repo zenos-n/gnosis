@@ -213,6 +213,7 @@ public:
                             CefRefPtr<CefJSDialogCallback> callback) override;
 
 private:
+  void ensure_brave_page();
   std::shared_ptr<GnosisBrave::Page> brave_;
   std::atomic<uint64_t> main_request_{0};
   // Pending requests are IO-only. Frame epochs are shared with UI navigation;

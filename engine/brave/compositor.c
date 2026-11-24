@@ -50,7 +50,7 @@ typedef struct {
   struct wlr_xdg_toplevel *toplevel;
   struct wlr_xdg_toplevel_decoration_v1 *decoration;
   struct wl_listener decoration_destroy;
-  struct wl_listener commit, map, unmap, destroy, maximize, fullscreen;
+  struct wl_listener commit, map, unmap, destroy, maximize, fullscreen, title;
   int requested_width, requested_height;
   double preferred_scale;
   GWeakRef fullscreen_window;
@@ -735,7 +735,7 @@ static void view_destroy(struct wl_listener *listener, void *data) {
   if (v->host && v->host->active == v) { cancel_touches(v->host); stop_capture(v->host); v->host->active = NULL; }
   wl_list_remove(&v->link); wl_list_remove(&v->commit.link); wl_list_remove(&v->map.link);
   wl_list_remove(&v->unmap.link); wl_list_remove(&v->destroy.link);
-  wl_list_remove(&v->maximize.link); wl_list_remove(&v->fullscreen.link);
+  wl_list_remove(&v->maximize.link); wl_list_remove(&v->fullscreen.link); wl_list_remove(&v->title.link);
   wl_list_remove(&v->decoration_destroy.link); g_free(v);
 }
 static void maximize(struct wl_listener *listener, void *data) {
@@ -773,6 +773,12 @@ static void restore_fullscreen(View *view) {
   g_weak_ref_set(&view->fullscreen_window, NULL);
   if (window) { gtk_window_unfullscreen(window); g_object_unref(window); }
 }
+static void view_title(struct wl_listener *listener, void *data) {
+  (void)data; View *view = wl_container_of(listener, view, title);
+  if (view->host) return;
+  bind_view(view);
+  if (view->host && view->toplevel->base->surface->mapped) view_map(&view->map, NULL);
+}
 static void new_toplevel(struct wl_listener *listener, void *data) {
   GnosisCompositor *server = wl_container_of(listener, server, new_toplevel);
   struct wlr_xdg_toplevel *toplevel = data; View *v = g_new0(View, 1);
@@ -786,6 +792,7 @@ static void new_toplevel(struct wl_listener *listener, void *data) {
   listen(&toplevel->events.destroy, &v->destroy, view_destroy);
   listen(&toplevel->events.request_maximize, &v->maximize, maximize);
   listen(&toplevel->events.request_fullscreen, &v->fullscreen, fullscreen);
+  listen(&toplevel->events.set_title, &v->title, view_title);
 }
 static View *popup_view(Popup *p) {
   struct wlr_surface *parent = p->popup->parent;

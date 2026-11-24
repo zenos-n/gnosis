@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 bool Page::close_is_approved() const {
-  return state_->close_approved && state_->close_navigation == state_->navigation_generation;
+  // Chromium already completed unload before destroying this target.
+  return state_->native_destroyed || (state_->close_approved && state_->close_navigation == state_->navigation_generation);
 }
 void Page::cancel_close() {
   auto& s = *state_;

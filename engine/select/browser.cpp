@@ -337,6 +337,54 @@ void Browser::changed() {
     owner()->update();
 }
 
+void Browser::ensure_brave_page() {
+  if (brave_) return;
+  brave_ = GnosisBrave::Page::create(area_, host && host->private_mode);
+  brave_->set_extension_popup(is_extension_popup, extension_owner_tab_id);
+  brave_->popup_size_changed = [this](int width, int height) {
+    if (!closing && on_popup_size) on_popup_size(width, height);
+  };
+  brave_->changed = [this] { url = brave_->uri; name = brave_->title; loading = brave_->loading; progress = brave_->progress; changed(); };
+  brave_->favicon_changed = [this](const std::string& page, const std::string& icon, GdkTexture* image) {
+    if (!closing && on_favicon) on_favicon(page, icon, image);
+  };
+  brave_->navigation_started = [this](const std::string& value) { main_navigation_uri_ = value; if (on_load_start) on_load_start(value); };
+  brave_->load_finished = [this](int status) {
+    if (on_load_end) on_load_end(status);
+    CefRefPtr<Browser> owner = this;
+    brave_->snapshot([owner](GdkTexture* image, const std::string&) { if (!owner->closing && image) g_set_object(&owner->thumbnail_, GDK_PAINTABLE(image)); });
+  };
+  brave_->closed = [this] { if (on_closed) on_closed(); };
+  brave_->tls_changed = [this] { if (on_security_changed) on_security_changed(); };
+  brave_->fullscreen_changed = [this](bool value) { if (on_fullscreen_changed) on_fullscreen_changed(value); };
+  brave_->open_uri = [this](const std::string& uri) {
+    if (closing) return false;
+    if (on_open_uri && on_open_uri(uri)) return true;
+    if (!on_create_popup) return false;
+    CefPopupFeatures features;
+    auto child = on_create_popup(uri, features);
+    if (!child || child->closing) return false;
+    child->defer_start = false;
+    child->navigate(uri);
+    if (child->on_ready) child->on_ready();
+    return true;
+  };
+  brave_->failed = [this](const std::string& error) {
+    loaded = false; loading = false; progress = 0;
+    show_error("Browser Process Stopped", error); changed();
+  };
+  changed();
+  brave_->create_popup = [this](const std::string& uri) -> std::shared_ptr<GnosisBrave::Page> {
+    if (closing || !on_create_popup) return {};
+    CefPopupFeatures features;
+    auto child = on_create_popup(uri, features);
+    if (!child || child->closing) return {};
+    child->ensure_brave_page();
+    child->defer_start = false; child->loaded = true;
+    return child->brave_;
+  };
+  brave_->popup_ready = [this] { if (!closing && on_ready) on_ready(); };
+}
 void Browser::start() {
   if (GnosisBrave::enabled()) {
     // Mapping an existing tab must not navigate it again.
@@ -345,43 +393,7 @@ void Browser::start() {
       if (brave_) brave_->start(); // An unparented view could not start until mapped.
       return;
     }
-    if (!brave_) {
-      brave_ = GnosisBrave::Page::create(area_, host && host->private_mode);
-      brave_->set_extension_popup(is_extension_popup, extension_owner_tab_id);
-      brave_->popup_size_changed = [this](int width, int height) {
-        if (!closing && on_popup_size) on_popup_size(width, height);
-      };
-      brave_->changed = [this] { url = brave_->uri; name = brave_->title; loading = brave_->loading; progress = brave_->progress; changed(); };
-      brave_->favicon_changed = [this](const std::string& page, const std::string& icon, GdkTexture* image) {
-        if (!closing && on_favicon) on_favicon(page, icon, image);
-      };
-      brave_->navigation_started = [this](const std::string& value) { main_navigation_uri_ = value; if (on_load_start) on_load_start(value); };
-      brave_->load_finished = [this](int status) {
-        if (on_load_end) on_load_end(status);
-        CefRefPtr<Browser> owner = this;
-        brave_->snapshot([owner](GdkTexture* image, const std::string&) { if (!owner->closing && image) g_set_object(&owner->thumbnail_, GDK_PAINTABLE(image)); });
-      };
-      brave_->closed = [this] { if (on_closed) on_closed(); };
-      brave_->tls_changed = [this] { if (on_security_changed) on_security_changed(); };
-      brave_->fullscreen_changed = [this](bool value) { if (on_fullscreen_changed) on_fullscreen_changed(value); };
-      brave_->open_uri = [this](const std::string& uri) {
-        if (closing) return false;
-        if (on_open_uri && on_open_uri(uri)) return true;
-        if (!on_create_popup) return false;
-        CefPopupFeatures features;
-        auto child = on_create_popup(uri, features);
-        if (!child || child->closing) return false;
-        child->defer_start = false;
-        child->navigate(uri);
-        if (child->on_ready) child->on_ready();
-        return true;
-      };
-      brave_->failed = [this](const std::string& error) {
-        loaded = false; loading = false; progress = 0;
-        show_error("Browser Process Stopped", error); changed();
-      };
-      changed();
-    }
+    ensure_brave_page();
     brave_->navigate(url); loaded = true;
     return;
   }

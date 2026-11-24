@@ -259,6 +259,17 @@ ordinary launcher activation, exact encoded URLs, browser fallback, private
 isolation, disabled associations and ambiguous claims. No human XDG defaults,
 browser profile, physical display or desktop focus are changed.
 
+`native-popup-opener-gtk-probe.cpp` checks the actual Brave backend, including
+native surface painting, original WindowProxy/opener and cloned sessionStorage,
+postMessage, script-driven close, and about:blank/document.write followed by a
+POST and cross-origin redirect, including an immediate POST before attachment.
+No Google account or real authentication is used.
+Compile with the preload flags above, then run `native-popup-opener-gtk-test.py`
+with `--browser`, `--probe`, `--xvfb` and `--xdotool` paths. Repeat with `--private`.
+The driver isolates HOME, all XDG directories, profiles, X11 and D-Bus; it asserts
+the exact POST body and records GTK popup feedback latency (under 400 ms).
+The native popup capture is `/tmp/gnosis-popup-opener.png`.
+
 `fractional-scale-gtk-test.py` uses a private headless Mutter 50.4 display with
 a virtual 3840×2160 monitor, private HOME/XDG directories and session bus. Compile
 `fractional-scale-gtk-probe.cpp` with the standard preload flags and
