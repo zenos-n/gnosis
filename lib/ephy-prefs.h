@@ -158,6 +158,7 @@ static const char * const ephy_prefs_web_schema[] = {
 #define EPHY_PREFS_ENABLE_CARET_BROWSING              "enable-caret-browsing"
 #define EPHY_PREFS_RESTORE_SESSION_POLICY             "restore-session-policy"
 #define EPHY_PREFS_RESTORE_SESSION_DELAYING_LOADS     "restore-session-delaying-loads"
+#define EPHY_PREFS_KEEP_CURRENT_TAB_ON_CLOSE          "keep-current-tab-on-close"
 #define EPHY_PREFS_TAB_SWITCHER_MRU                   "tab-switcher-mru"
 #define EPHY_PREFS_CONTENT_FILTERS                    "content-filters"
 #define EPHY_PREFS_SEARCH_ENGINES                     "search-engine-providers"

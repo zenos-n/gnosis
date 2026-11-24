@@ -89,6 +89,7 @@ struct _PrefsGeneralPage {
   GtkWidget *enable_mouse_gesture_row;
   GtkWidget *vim_mode_row;
   GtkWidget *enable_switch_to_new_tab;
+  GtkWidget *keep_current_tab_on_close;
   GtkWidget *tab_switcher_mru;
   GtkWidget *enable_navigation_gestures_row;
 
@@ -994,6 +995,7 @@ prefs_general_page_class_init (PrefsGeneralPageClass *klass)
   gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, enable_mouse_gesture_row);
   gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, vim_mode_row);
   gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, enable_switch_to_new_tab);
+  gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, keep_current_tab_on_close);
   gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, tab_switcher_mru);
   gtk_widget_class_bind_template_child (widget_class, PrefsGeneralPage, enable_navigation_gestures_row);
 
@@ -1305,6 +1307,12 @@ setup_general_page (PrefsGeneralPage *general_page)
   g_settings_bind (web_settings,
                    EPHY_PREFS_WEB_SWITCH_TO_NEW_TAB,
                    general_page->enable_switch_to_new_tab,
+                   "active",
+                   G_SETTINGS_BIND_DEFAULT);
+
+  g_settings_bind (EPHY_SETTINGS_MAIN,
+                   EPHY_PREFS_KEEP_CURRENT_TAB_ON_CLOSE,
+                   general_page->keep_current_tab_on_close,
                    "active",
                    G_SETTINGS_BIND_DEFAULT);
 

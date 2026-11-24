@@ -279,3 +279,13 @@ a virtual 3840×2160 monitor, private HOME/XDG directories and session bus. Comp
 viewport and actual imported texture density through the GTK snapshot tree,
 including oversized GPU allocations and live transitions under 400ms. It does
 not alter the desktop's monitor configuration, focus, or running browser.
+
+`native-tab-close-focus-gtk-test.py` runs `native-tab-close-focus-gtk-probe.cpp`
+with the usual preload flags, `-Iengine/brave`, and
+`gtk4 libadwaita-1 json-glib-1.0` cflags. Pass `--browser "$GNOSIS" --probe
+"$PROBE" --xvfb "$XVFB" --xdotool "$XDOTOOL"`. Its private Xvfb/bus/profile
+exercise real middle-click closes on both sides and on the selected tab, the
+new default-on native preference and its disabled behavior, selection changes
+while closure is pending, and canceling a background native beforeunload warning.
+Background closure must not emit a selected-page change, including while its
+warning is visible. Tab removal feedback must arrive within 400 ms.

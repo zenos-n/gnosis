@@ -3148,7 +3148,8 @@ tab_view_close_page_cb (AdwTabView *tab_view,
   }
 
   data = tab_has_modified_forms_data_new (window, embed, page);
-  ephy_tab_view_select_page (window->tab_view, GTK_WIDGET (embed));
+  if (!g_settings_get_boolean (EPHY_SETTINGS_MAIN, EPHY_PREFS_KEEP_CURRENT_TAB_ON_CLOSE))
+    ephy_tab_view_select_page (window->tab_view, GTK_WIDGET (embed));
   g_timeout_add (25, start_tab_close_check, data);
   return GDK_EVENT_STOP;
 }

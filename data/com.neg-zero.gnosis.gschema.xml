@@ -73,6 +73,11 @@
                         <summary>Whether to delay loading of tabs that are not immediately visible on session restore</summary>
                         <description>When this option is set to true, tabs will not start loading until the user switches to them, upon session restore.</description>
                 </key>
+                <key type="b" name="keep-current-tab-on-close">
+                        <default>true</default>
+                        <summary>Keep the current tab when closing a background tab</summary>
+                        <description>When enabled, closing a background tab leaves the current tab selected. Closing the selected tab still selects another tab.</description>
+                </key>
                 <key type="b" name="tab-switcher-mru">
                         <default>false</default>
                         <summary>Cycle tabs in most recently used order</summary>
