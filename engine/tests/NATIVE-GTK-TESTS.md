@@ -258,3 +258,13 @@ The fixture checks a closed app, an already-running app receiving a deep link,
 ordinary launcher activation, exact encoded URLs, browser fallback, private
 isolation, disabled associations and ambiguous claims. No human XDG defaults,
 browser profile, physical display or desktop focus are changed.
+
+`fractional-scale-gtk-test.py` uses a private headless Mutter 50.4 display with
+a virtual 3840×2160 monitor, private HOME/XDG directories and session bus. Compile
+`fractional-scale-gtk-probe.cpp` with the standard preload flags and
+`gtk4 libadwaita-1 json-glib-1.0` cflags, then pass `--gnosis`, `--probe` and
+`--mutter`. It changes only its private virtual monitor through 100%, 166.67%,
+200%, 125% and back to 100%. It checks devicePixelRatio, the unchanged logical
+viewport and actual imported texture density through the GTK snapshot tree,
+including oversized GPU allocations and live transitions under 400ms. It does
+not alter the desktop's monitor configuration, focus, or running browser.

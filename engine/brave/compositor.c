@@ -24,6 +24,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
@@ -51,6 +52,7 @@ typedef struct {
   struct wl_listener decoration_destroy;
   struct wl_listener commit, map, unmap, destroy, maximize, fullscreen;
   int requested_width, requested_height;
+  double preferred_scale;
   GWeakRef fullscreen_window;
   gboolean owns_fullscreen;
   gboolean content_fullscreen;
@@ -533,6 +535,25 @@ static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data) {
   }
   return G_SOURCE_CONTINUE;
 }
+static double host_scale(GnosisCompositorView *host) {
+  GtkNative *native = gtk_widget_get_native(GTK_WIDGET(host));
+  GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+  return surface ? gdk_surface_get_scale(surface) : gtk_widget_get_scale_factor(GTK_WIDGET(host));
+}
+static void scale_surface(struct wlr_surface *surface, int x, int y, void *data) {
+  (void)x; (void)y; double scale = *(double *)data;
+  wlr_fractional_scale_v1_notify_scale(surface, scale);
+  wlr_surface_set_preferred_buffer_scale(surface, (int32_t)ceil(scale));
+}
+static void sync_scale(View *view) {
+  if (!view->host) return;
+  double scale = host_scale(view->host);
+  if (view->preferred_scale == scale) return;
+  view->preferred_scale = scale;
+  // The root may not be mapped yet; seed its scale before its first buffer.
+  scale_surface(view->toplevel->base->surface, 0, 0, &scale);
+  wlr_xdg_surface_for_each_surface(view->toplevel->base, scale_surface, &scale);
+}
 static void surface_commit(struct wl_listener *listener, void *data) {
   (void)data; Surface *s = wl_container_of(listener, s, commit);
   if (s->surface == s->server->cursor_surface) update_cursor(s->server);
@@ -546,8 +567,11 @@ static void surface_commit(struct wl_listener *listener, void *data) {
   }
   for (guint i = 0; i < s->server->hosts->len; i++) {
     GnosisCompositorView *host = g_ptr_array_index(s->server->hosts, i);
-    if (host->active && host->active->toplevel->base->surface == root)
+    if (host->active && host->active->toplevel->base->surface == root) {
+      double scale = host_scale(host);
+      scale_surface(s->surface, 0, 0, &scale);
       gtk_widget_queue_draw(GTK_WIDGET(host));
+    }
   }
 }
 static void surface_destroy(struct wl_listener *listener, void *data) {
@@ -651,6 +675,7 @@ static void configure_size(View *view, int width, int height) {
 }
 static void configure(View *view) {
   bind_view(view);
+  sync_scale(view);
   GtkWidget *widget = view->host ? GTK_WIDGET(view->host) : NULL;
   // Hidden restore tabs have no allocation yet. Keep their last positive size
   // until GTK maps them, using the original fallback for newly created tabs.
@@ -662,6 +687,7 @@ static void size_allocate(GtkWidget *widget, int width, int height, int baseline
   (void)baseline;
   GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(widget);
   if (self->active && self->active->toplevel->base->initialized) {
+    sync_scale(self->active);
     if (gtk_widget_get_mapped(widget)) configure_size(self->active, width, height);
     else configure(self->active);
   }
@@ -775,6 +801,10 @@ static View *popup_view(Popup *p) {
 static void configure_popup(Popup *p) {
   View *v = popup_view(p);
   if (v) {
+    if (v->host) {
+      double scale = host_scale(v->host);
+      scale_surface(p->popup->base->surface, 0, 0, &scale);
+    }
     struct wlr_box bounds = v->toplevel->base->geometry;
     wlr_xdg_popup_unconstrain_from_box(p->popup, &bounds);
   }
@@ -1082,6 +1112,7 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   struct wlr_compositor *compositor = wlr_compositor_create(self->display, 6, self->renderer);
   listen(&compositor->events.new_surface, &self->new_surface, new_surface);
   wlr_subcompositor_create(self->display); wlr_viewporter_create(self->display);
+  if (!wlr_fractional_scale_manager_v1_create(self->display, 1)) goto failed;
   wlr_data_device_manager_create(self->display);
   if (!wlr_linux_dmabuf_v1_create_with_renderer(self->display, 4, self->renderer)) goto failed;
   struct wlr_xdg_shell *shell = wlr_xdg_shell_create(self->display, 6);
