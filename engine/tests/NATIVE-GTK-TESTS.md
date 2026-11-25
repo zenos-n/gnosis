@@ -318,3 +318,18 @@ wlroots 0.19.3. The shell stays sRGB/8-bit; browser content retains its negotiat
 color state on native subsurfaces. Unsupported transforms, transparency or
 occluding effects use GTK's normal rendering fallback. Actual HDR and adaptive
 sync still depend on the outer compositor, display configuration and driver.
+
+`native-tabs-gtk-test.py` preloads `native-tabs-gtk-probe.cpp` into an isolated
+Xvfb display, bus, temporary HOME and reusable profile. Pass `--browser`,
+`--probe`, `--xvfb` and `--xdotool`. Real middle clicks cover ordinary,
+noopener and opener links: new tabs must open without even a temporary selection
+change, while the explicit foreground preference still works. The runner
+restarts twice with the same profile and requires exactly one GTK/native tab on
+startup. It checks the actual default-off restore row and its explicit opt-in.
+`brave-session-preferences-test` checks that backend startup restoration is
+disabled while unrelated profile data survives, including malformed input.
+
+The popup-opener regression now seeds an unmanaged native browser window before
+opening real popups. Adopted pages must get their own native window, with no
+browser toolbar in the captured content; existing opener, session storage,
+named-window POST, redirects, postMessage and script-close checks still apply.

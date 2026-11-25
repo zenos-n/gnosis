@@ -64,7 +64,7 @@
 			<default>true</default>
 		</key>
                 <key name="restore-session-policy" enum="com.neg-zero.Gnosis.EphyPrefsRestoreSessionPolicy">
-                        <default>'always'</default>
+                        <default>'crashed'</default>
                         <summary>Whether to automatically restore the last session</summary>
                         <description>Defines how the session will be restored during startup. Allowed values are “always” (the previous state of the application is always restored) and “crashed” (the session is only restored if the application crashes).</description>
                 </key>

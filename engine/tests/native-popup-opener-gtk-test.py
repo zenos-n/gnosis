@@ -69,6 +69,7 @@ with tempfile.TemporaryDirectory(prefix='gnosis-popup-opener-') as directory, op
         command = ['dbus-run-session', f'--config-file={bus}', '--', 'env',
                    f'LD_PRELOAD={Path(args.probe).resolve()}', args.browser, f'--profile={root / "profile"}']
         if args.private:
+            env['GNOSIS_POPUP_PRIVATE'] = '1'
             command.append('--incognito-mode')
         command.append(f'http://127.0.0.1:{server.server_port}/')
         process = subprocess.Popen(command, env=env, stdout=log, stderr=log, start_new_session=True)

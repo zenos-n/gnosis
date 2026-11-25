@@ -35,6 +35,10 @@ static gboolean prepare_translation_preferences(const char *directory, GError **
   if (!JSON_NODE_HOLDS_OBJECT(root)) {
     g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "Brave Preferences is not a JSON object"); return FALSE;
   }
+  /* The GTK shell owns restoration; never restore hidden Chromium windows. */
+  JsonObject *session = object_member(json_node_get_object(root), "session", error);
+  if (!session) return FALSE;
+  json_object_set_int_member(session, "restore_on_startup", 5); /* Chromium NEW_TAB */
   JsonObject *translate = object_member(json_node_get_object(root), "translate", error);
   if (!translate) return FALSE;
   json_object_set_boolean_member(translate, "enabled", FALSE);

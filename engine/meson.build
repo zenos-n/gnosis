@@ -63,6 +63,10 @@ compositor_lib = static_library('gnosis-compositor', ['brave/compositor.c', 'bra
   dependencies: compositor_deps, c_args: ['-Wno-declaration-after-statement'], pic: true)
 compositor_dep = declare_dependency(link_with: compositor_lib, dependencies: compositor_deps)
 if get_option('unit_tests').enabled()
+  session_preferences_test = executable('brave-session-preferences-test',
+    ['tests/brave-session-preferences-test.c', 'brave/profile.c'],
+    dependencies: [glib_dep, json_glib_dep], include_directories: include_directories('.'))
+  test('Brave backend session preferences', session_preferences_test)
   edge_swipe_test = executable('edge-swipe-test', 'tests/edge-swipe-test.c',
     include_directories: include_directories('brave'),
     dependencies: meson.get_compiler('c').find_library('m'), c_args: ['-UNDEBUG'])

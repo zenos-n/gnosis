@@ -1681,7 +1681,29 @@ open_new_uri_cb (EphyEngineView *web_view,
                   const char     *uri,
                   EphyWindow     *window)
 {
-  return ephy_shell_open_external_uri (ephy_shell_get_default (), uri, FALSE);
+  EphyNewTabFlags flags = EPHY_NEW_TAB_APPEND_AFTER;
+  EphyEmbed *embed;
+  gboolean switch_to_tab;
+
+  if (ephy_shell_open_external_uri (ephy_shell_get_default (), uri, FALSE))
+    return TRUE;
+
+  /* Installed web apps retain their separate-window popup handling. */
+  if (ephy_embed_shell_get_mode (ephy_embed_shell_get_default ()) == EPHY_EMBED_SHELL_MODE_APPLICATION ||
+      (!g_str_has_prefix (uri, "http://") && !g_str_has_prefix (uri, "https://")))
+    return FALSE;
+
+  switch_to_tab = g_settings_get_boolean (EPHY_SETTINGS_WEB, EPHY_PREFS_WEB_SWITCH_TO_NEW_TAB);
+  if (switch_to_tab)
+    flags |= EPHY_NEW_TAB_JUMP;
+
+  embed = ephy_shell_new_tab (ephy_shell_get_default (), window,
+                               EPHY_GET_EMBED_FROM_EPHY_WEB_VIEW (web_view), flags);
+  ephy_web_view_load_url (ephy_embed_get_web_view (embed), uri);
+  if (switch_to_tab)
+    gtk_widget_grab_focus (GTK_WIDGET (ephy_embed_get_web_view (embed)));
+
+  return TRUE;
 }
 
 

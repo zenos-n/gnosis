@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gnosis native integration",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5vCPTdqdtyqcgJjJ7gDhYDpfaASt+1eX4XR75958GRgnIQmYrfuE5xEftDPwVWoGp2DiRIsZC+sc3Vnt40FRBr28MhyNgjjzvZlRN/83/3oAIKFsWZuTA8YAlN+Bgjm/p3XYI8HnCkFa/MQlaY58pdU7BiZJJZcLk/Ty9OmoQSro7AJFk33xS8ynLEBfAlEFAixNusYPnsww0zT4GlR7Ex5cE73YEE7lOmSKTi34fkfgvPIl/7cAeEdlZSltclr6xqHbsF+/xfj9bI89PgneAqS3YIolRa/9X+bo55Q0PZ89B849Xa6lHWNiDr7+rhzljnPPG6bEeOs5qrT8PK/XMQIDAQAB",
   "permissions": [
     "downloads",
@@ -12,7 +12,8 @@
     "browsingData",
     "cookies",
     "scripting",
-    "webNavigation"
+    "webNavigation",
+    "debugger"
   ],
   "host_permissions": ["http://*/*", "https://*/*", "file:///*"],
   "background": {

@@ -1616,9 +1616,32 @@ void Page::adopt(const std::shared_ptr<Page>& parent, const std::string& id, con
         return;
       }
       self->session = text(result, "sessionId"); self->state_->process->sessions[self->session] = self;
-      self->attach(); self->claim_popup_surface();
-      if (!composited() && self->popup_ready) self->popup_ready();
-      if (self->changed) self->changed();
+      // Keep this exact browsing context, but never embed a multi-tab browser.
+      const std::string script = "(async()=>{const target=(await chrome.debugger.getTargets()).find(t=>t.id===" + quote(self->target) + R"JS(&&t.type==='page');
+        if(!target||!Number.isInteger(target.tabId)||target.tabId<0)throw Error('Missing native popup identity');
+        const tab=await chrome.tabs.get(target.tabId);let window=await chrome.windows.get(tab.windowId);
+        if(window.type==='normal')window=await chrome.windows.create({tabId:tab.id,type:'popup',focused:false,incognito:tab.incognito});
+        const tabs=await chrome.tabs.query({windowId:window.id});
+        if(tabs.length!==1||tabs[0].id!==tab.id)throw Error('Native popup must own exactly one tab');
+        return {tabId:tab.id,windowId:window.id};})())JS";
+      self->state_->process->command("Runtime.evaluate", "{\"expression\":" + quote(script) + ",\"awaitPromise\":true,\"returnByValue\":true}",
+        self->state_->process->integration_session, [weak](JsonObject* result, const std::string& error) {
+          auto self = weak.lock(); if (!self || self->is_closed()) return;
+          auto* value = object(object(result,"result"),"value");
+          if (!value || object(result,"exceptionDetails")) {
+            self->state_->popup_identity_pending = false; self->state_->process->finish_adoption(false);
+            if (self->failed) self->failed("Could not isolate the original browser popup: " + error);
+            return;
+          }
+          auto& s = *self->state_;
+          s.native_tab = json_object_get_int_member(value,"tabId");
+          s.window = json_object_get_int_member(value,"windowId");
+          s.process->zoom_tabs[s.native_tab] = self;
+          s.popup_identity_pending = false; s.process->finish_adoption(true);
+          self->attach(); self->claim_popup_surface();
+          if (!composited() && self->popup_ready) self->popup_ready();
+          if (self->changed) self->changed();
+        });
     });
 }
 void Page::claim_popup_surface() {
