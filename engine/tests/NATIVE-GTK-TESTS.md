@@ -333,3 +333,12 @@ The popup-opener regression now seeds an unmanaged native browser window before
 opening real popups. Adopted pages must get their own native window, with no
 browser toolbar in the captured content; existing opener, session storage,
 named-window POST, redirects, postMessage and script-close checks still apply.
+
+`native-image-copy-gtk-test.py` preloads `native-image-copy-gtk-probe.cpp` on a
+private Xvfb display/bus with temporary HOME/profile. Compile with the normal
+C++ preload flags and `-Iengine/brave`; pass `--browser`, `--probe`, `--xvfb`
+and `--xdotool`. Real right clicks and the native Copy Image action must produce
+original 64x48 clipboard pixels for a directly opened WebP with a `.jpeg`
+filename, a scaled cross-origin WebP without CORS headers, and an SVG. Copy must
+become available within 400 ms. The package merges the base/SVG Pixbuf cache
+with the WebP loader cache; merely adding the dependency does not register it.

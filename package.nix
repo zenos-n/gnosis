@@ -5,6 +5,10 @@ let
   displayLibraries = import ./engine/brave/display-libraries.nix { inherit pkgs; };
   gnosisGtk = displayLibraries.gtk;
   gnosisWlroots = displayLibraries.wlroots;
+  pixbufLoaders = pkgs.runCommand "gnosis-pixbuf-loaders.cache" {} ''
+    cat ${pkgs.librsvg}/${pkgs.gdk-pixbuf.binaryDir}/loaders.cache \
+      ${pkgs.webp-pixbuf-loader}/${pkgs.gdk-pixbuf.binaryDir}/webp-loaders.cache > "$out"
+  '';
   uiLibraries = with pkgs; [ gtk4 libadwaita json-glib libepoxy fontconfig freetype libsodium libsecret libsoup_3 qrencode ];
   chromiumLibraries = with pkgs; [
     stdenv.cc.cc.lib glib nss nspr dbus at-spi2-core systemd
@@ -122,6 +126,7 @@ let
     mesonFlags = [ "-Dgranite=disabled" "-Dunit_tests=disabled" "-Dman-pages=disabled" "-Dcef_root=${cefSdk}" "-Dcef_runtime=linked" "-Dublock_dir=${ublock}" "-Dkeepassxc_dir=${keepassxcBrowser}" ];
     preFixup = (old.preFixup or "") + ''
       gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [ pkgs.dconf ]})
+      gappsWrapperArgs+=(--set GDK_PIXBUF_MODULE_FILE ${pixbufLoaders})
       gappsWrapperArgs+=(--set GNOSIS_ENGINE brave)
       gappsWrapperArgs+=(--set-default GNOSIS_SURFACE wayland)
       gappsWrapperArgs+=(--set-default GNOSIS_BRAVE_EXECUTABLE ${brave}/bin/brave)
