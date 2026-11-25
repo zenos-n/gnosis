@@ -138,7 +138,7 @@ static gboolean tick(gpointer) {
   if(stage==0) {
     if(std::abs(gdk_surface_get_scale(gtk_native_get_surface(GTK_NATIVE(window)))-g_ascii_strtod(g_getenv("GNOSIS_HDR_TEST_SCALE"),nullptr))>.001)return G_SOURCE_CONTINUE;fixture=0;gtk_widget_queue_draw(host);stage=1;changed=now;
   } else if(stage==1) {
-    evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,hz:1000/(frameDeltas.slice(-60).sort((a,b)=>a-b)[30]||0)})",[](JsonObject *v){auto *json=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_SDR_PACING %s\n",json);if(strstr(json,"\"hdr\":true"))fail("SDR output falsely advertised HDR");g_print("HDR_GTK_SDR_PASS\n");fixture=1;gtk_widget_queue_draw(host);stage=2;changed=g_get_monotonic_time();});
+    evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,hz:1000/(frameDeltas.slice(-60).sort((a,b)=>a-b)[30]||0)})",[](JsonObject *v){auto *json=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_SDR_PACING %s\n",json);if(g_getenv("GNOSIS_HDR_REAL_FEEDBACK")){const char *rate=strstr(json,"\"hz\":");if(!rate||g_ascii_strtod(rate+5,nullptr)<90)fail("native120Hz display fell below90fps");}if(strstr(json,"\"hdr\":true"))fail("SDR output falsely advertised HDR");g_print("HDR_GTK_SDR_PASS\n");fixture=1;gtk_widget_queue_draw(host);stage=2;changed=g_get_monotonic_time();});
   } else if(stage==2) {
     evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,p3:matchMedia('(color-gamut: p3)').matches,rec2020:matchMedia('(color-gamut: rec2020)').matches,webgpu:!!navigator.gpu,canvas:(()=>{const c=document.createElement('canvas').getContext('2d',{colorType:'float16',colorSpace:'display-p3',toneMapping:{mode:'extended'}});const a=c.getContextAttributes();return a.colorType==='float16'&&a.toneMapping?.mode==='extended'})()})",[](JsonObject *v){
       auto *value=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_WEB_CAPABILITIES %s\n",value);
@@ -165,7 +165,7 @@ static gboolean tick(gpointer) {
     evaluate("!matchMedia('(dynamic-range: high)').matches",[](JsonObject *v){if(!json_object_get_boolean_member_with_default(v,"value",false))return;
       evaluate("document.body.innerHTML='<p>SDR again</p>'",[](JsonObject *){stage=5;changed=g_get_monotonic_time();});});
   } else if(stage==5) {
-    if (!gnosis_test_variable_feedback || !gnosis_test_unknown_feedback || !gnosis_test_outer_feedback || !gnosis_test_target_metadata) fail("missing actual/variable/unknown presentation feedback");
+    if (!gnosis_test_outer_feedback || !gnosis_test_target_metadata || (!g_getenv("GNOSIS_HDR_REAL_FEEDBACK") && (!gnosis_test_variable_feedback || !gnosis_test_unknown_feedback))) fail("missing actual/variable/unknown presentation feedback");
     g_print("HDR_GTK_TARGET_PASS gamut and MaxCLL/MaxFALL reach nested surfaces\n");
     g_print("HDR_GTK_PRESENTATION_PASS real outer callbacks=%d, variable=%d, unknown=%d\n",gnosis_test_outer_feedback,gnosis_test_variable_feedback,gnosis_test_unknown_feedback);
     g_print("HDR_GTK_PASS SDR→HDR→SDR negotiation and content-only HDR window rendering\n");page.reset();g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()),"quit",nullptr);return G_SOURCE_REMOVE;

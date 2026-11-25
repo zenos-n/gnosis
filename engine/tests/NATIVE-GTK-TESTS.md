@@ -298,7 +298,8 @@ the pinned color-management server protocol header), then link that object
 into `native-hdr-gtk-probe.cpp` using the normal C++ preload flags and
 `-Iengine/brave`. Pass `--gnosis`, `--probe`, `--mutter` and `--ffmpeg` (FFmpeg
 8.1.2 with libvpx); run once with `--scale 1` and once with
-`--scale 1.6666666666666667`.
+`--scale 1.6666666666666667`. A separate `--real-feedback` run retains the
+actual presentation events and requires at least90fps on the120Hz virtual output.
 
 The fixture injects SDR/PQ output descriptions at the GTK-to-nested-display
 boundary. Chromium must update its actual HDR media query, preserve highlights

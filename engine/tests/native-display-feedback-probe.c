@@ -13,6 +13,7 @@ gboolean gnosis_gdk_frame_timings_get_presentation(GdkFrameTimings *timings, gui
   gboolean (*real)(GdkFrameTimings *, guint32 *, guint32 *) = dlsym(RTLD_NEXT, "gnosis_gdk_frame_timings_get_presentation");
   gboolean valid = real(timings, refresh, flags);
   if (valid) gnosis_test_outer_feedback++;
+  if (g_getenv("GNOSIS_HDR_REAL_FEEDBACK")) return valid;
   if (gnosis_hdr_fixture_mode == 1) {
     *refresh = 12345678;
     *flags = 1 | 8 | 16; /* Ensure nested rendering strips direct-scanout claims. */

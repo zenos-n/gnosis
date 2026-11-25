@@ -19,6 +19,7 @@ p.add_argument('--ffmpeg', required=True, type=Path)
 p.add_argument('--mutter', required=True, type=Path)
 p.add_argument('--log', type=Path, default=Path('/tmp/gnosis-hdr.log'))
 p.add_argument('--scale', type=float, default=1, choices=(1, 5/3), help='Private virtual display scale')
+p.add_argument('--real-feedback', action='store_true', help='Check native120Hz cadence without synthetic refresh injection')
 p.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
 a = p.parse_args()
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -109,6 +110,7 @@ try:
     else:
         raise AssertionError('Private Wayland display unavailable')
     env = dict(os.environ, LD_PRELOAD=str(a.probe.resolve()), GNOSIS_HDR_TEST='1', GNOSIS_HDR_TEST_SCALE=str(a.scale))
+    if a.real_feedback: env['GNOSIS_HDR_REAL_FEEDBACK'] = '1'
     subprocess.run([str(a.gnosis.resolve()), '--incognito-mode',
                     '--profile=' + str(Path(os.environ['XDG_DATA_HOME']) / 'profile'),
                     f'http://127.0.0.1:{server.server_port}/fractional.html'], env=env, check=True, timeout=110)
