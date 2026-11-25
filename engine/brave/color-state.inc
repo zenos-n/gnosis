@@ -46,11 +46,18 @@ static void sync_view_color(View *view) {
           .white = {primaries[6]/1000000.f, primaries[7]/1000000.f},
         };
       }
-      color.max_cll = light[0]; color.max_fall = light[1];
+      /* GDK's PQ textures use a 203-nit reference. The outer compositor applies
+       * the monitor's white level; baking it into pixels here applies it twice
+       * on native planes and disagrees with GTK's sRGB rendering fallback. */
+      float reference_scale = luminances[2] ? 203.f / luminances[2] : 1.f;
+      color.max_cll = lroundf(light[0] * reference_scale);
+      color.max_fall = lroundf(light[1] * reference_scale);
       if (luminances[1] && luminances[2]) {
         color.has_luminances = color.has_target_luminance = TRUE;
-        color.luminances = (struct wlr_color_luminances){luminances[0] / 10000.f, luminances[1], luminances[2]};
-        color.target_luminance = (struct wlr_color_luminances){luminances[3] / 10000.f, luminances[4], luminances[2]};
+        color.luminances = (struct wlr_color_luminances){0, 10000, 203};
+        color.target_luminance = (struct wlr_color_luminances){
+          luminances[3] / 10000.f * reference_scale,
+          luminances[4] * reference_scale, 203};
       }
     }
   }

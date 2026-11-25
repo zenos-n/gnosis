@@ -38,8 +38,9 @@ void wlr_color_manager_v1_set_surface_preferred_image_description(struct wlr_col
       fabsf(data->mastering_display_primaries.green.y - .69f) < .00001f &&
       fabsf(data->mastering_display_primaries.blue.y - .06f) < .00001f &&
       fabsf(data->mastering_display_primaries.white.y - .329f) < .00001f &&
-      data->max_cll == 1000 && data->max_fall == 400 && data->has_luminances &&
-      data->luminances.reference == 267) gnosis_test_target_metadata++;
+      data->max_cll == 760 && data->max_fall == 304 && data->has_luminances &&
+      data->luminances.reference == 203 && data->has_target_luminance &&
+      fabsf(data->target_luminance.max / data->luminances.reference - 1000.f / 267) < .0001f) gnosis_test_target_metadata++;
   void (*real)(struct wlr_color_manager_v1 *,struct wlr_surface *, const struct wlr_image_description_v1_data *)=dlsym(RTLD_NEXT,"wlr_color_manager_v1_set_surface_preferred_image_description");
   real(manager,surface,data);
 }

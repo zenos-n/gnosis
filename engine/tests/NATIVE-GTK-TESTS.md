@@ -357,3 +357,11 @@ The video regression repeats DOM fullscreen entry and exit three times, waiting
 for restored window geometry and retained HDR pixels after each exit. SDR ramp
 checks snapshot the current compositor-view surfaces directly; a widget
 paintable may still contain an empty or stale render node during color changes.
+
+The fixture also sends twelve real F11 key presses via its private Mutter
+RemoteDesktop session: maximize → fullscreen → maximize → unmaximize →
+fullscreen → unmaximize, repeated three times. Every state must preserve the
+five SDR gray bands. Nested PQ uses GTK's 203-nit reference; a simulated
+267-nit physical white level changes target headroom/light values proportionally,
+not the page's encoded SDR grays. This keeps native PQ planes and GTK's sRGB
+fallback consistent when GNOME applies the display's white-level adjustment.
