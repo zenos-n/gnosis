@@ -71,7 +71,27 @@
  
 --- a/gdk/wayland/gdkwaylandcolor.c
 +++ b/gdk/wayland/gdkwaylandcolor.c
-@@ -981,9 +981,9 @@
+@@ -780,6 +780,9 @@
+   struct wp_color_management_surface_v1 *mgmt_surface;
+   struct wp_color_management_surface_feedback_v1 *mgmt_feedback;
+   ImageDescription *current_desc;
++  guint32 gnosis_luminances[5], gnosis_light[2];
++  gint32 gnosis_primaries[8];
++  gboolean gnosis_has_target;
+   GdkColorStateChanged callback;
+   gpointer data;
+ 
+@@ -861,6 +864,9 @@
+ 
+   g_assert (self->current_desc == desc);
+ 
++  /* The query is destroyed after the callback; display metadata must survive it. */
++  gnosis_gdk_wayland_color_get_luminances (self, self->gnosis_luminances);
++  self->gnosis_has_target = gnosis_gdk_wayland_color_get_target (self, self->gnosis_primaries, self->gnosis_light);
+   cs = gdk_color_state_from_image_description_bits (desc);
+   if (cs)
+     {
+@@ -981,9 +987,9 @@
    ImageDescription *desc = data;
  
    desc->target_r_x = r_x; desc->target_r_y = r_y;
@@ -84,7 +104,7 @@
    desc->has_target_primaries = 1;
  }
  
-@@ -1064,7 +1064,7 @@
+@@ -1064,7 +1070,7 @@
    g_assert (self->current_desc == desc);
  
    cs = g_hash_table_lookup (self->color->id_to_cs, GUINT_TO_POINTER (identity));
@@ -93,7 +113,7 @@
      {
        self->callback (self, cs, self->data);
  
-@@ -1342,3 +1342,34 @@
+@@ -1342,3 +1348,45 @@
  
    return TRUE;
  }
@@ -104,6 +124,11 @@
 +                                        guint32                values[5])
 +{
 +  ImageDescription *desc = self ? self->current_desc : NULL;
++  if (!desc && self)
++    {
++      memcpy (values, self->gnosis_luminances, sizeof self->gnosis_luminances);
++      return;
++    }
 +  memset (values, 0, 5 * sizeof (guint32));
 +  if (!desc || !desc->has_luminances)
 +    return;
@@ -118,6 +143,12 @@
 +gnosis_gdk_wayland_color_get_target (GdkWaylandColorSurface *self, gint32 primaries[8], guint32 light[2])
 +{
 +  ImageDescription *desc = self ? self->current_desc : NULL;
++  if (!desc && self)
++    {
++      memcpy (primaries, self->gnosis_primaries, sizeof self->gnosis_primaries);
++      memcpy (light, self->gnosis_light, sizeof self->gnosis_light);
++      return self->gnosis_has_target;
++    }
 +  memset (primaries, 0, 8 * sizeof (gint32));
 +  light[0] = desc && desc->has_target_max_cll ? desc->target_max_cll : 0;
 +  light[1] = desc && desc->has_target_max_fall ? desc->target_max_fall : 0;
@@ -401,3 +432,27 @@
  G_END_DECLS
 +
 +void gnosis_gtk_snapshot_set_widget (GtkSnapshot *snapshot, GtkWidget *widget);
+--- a/gsk/gskoffload.c
++++ b/gsk/gskoffload.c
+@@ -273,6 +273,21 @@
+                 out_source_rect->origin.y = 0;
+                 out_source_rect->size.width = width;
+                 out_source_rect->size.height = height;
++              }
++
++            /* Float scaling can put a clipped edge a fraction beyond the buffer. */
++            graphene_rect_t texture_bounds = GRAPHENE_RECT_INIT (0, 0, width, height);
++            if (!gsk_rect_contains_rect (&texture_bounds, out_source_rect))
++              {
++                float right = out_source_rect->origin.x + out_source_rect->size.width;
++                float bottom = out_source_rect->origin.y + out_source_rect->size.height;
++                if (out_source_rect->origin.x < -0.001f || out_source_rect->origin.y < -0.001f ||
++                    right > width + 0.001f || bottom > height + 0.001f)
++                  goto out;
++                out_source_rect->origin.x = MAX (0, out_source_rect->origin.x);
++                out_source_rect->origin.y = MAX (0, out_source_rect->origin.y);
++                out_source_rect->size.width = MIN (right, width) - out_source_rect->origin.x;
++                out_source_rect->size.height = MIN (bottom, height) - out_source_rect->origin.y;
+               }
+ 
+             ret = texture;

@@ -91,7 +91,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         elif self.path == '/hdr.webm':
             body, mime = video, 'video/webm'
         else:
-            body=b'<!doctype html><title>HDR fixture</title><style>body{background:#222;color:#ddd}</style><h1>SDR document</h1><div id=anim style="position:fixed;bottom:0;width:10px;height:10px;background:red"></div><script>let i=0;window.frameDeltas=[];let last;function tick(t){if(last)frameDeltas.push(t-last);last=t;if(frameDeltas.length>120)frameDeltas.shift();const a=document.getElementById("anim");if(a)a.style.transform="translateX("+(i++%100)+"px)";requestAnimationFrame(tick)}requestAnimationFrame(tick)</script>'
+            body=b'<!doctype html><title>HDR fixture</title><style>body{margin:0;background:linear-gradient(to right,#000 0% 20%,#404040 20% 40%,#808080 40% 60%,#c0c0c0 60% 80%,#fff 80% 100%);color:#ddd}</style><h1>SDR document</h1><div id=anim style="position:fixed;bottom:0;width:10px;height:10px;background:red"></div><script>let i=0;window.frameDeltas=[];let last;function tick(t){if(last)frameDeltas.push(t-last);last=t;if(frameDeltas.length>120)frameDeltas.shift();const a=document.getElementById("anim");if(a)a.style.transform="translateX("+(i++%100)+"px)";requestAnimationFrame(tick)}requestAnimationFrame(tick)</script>'
             mime='text/html; charset=utf-8'
         self.send_response(200)
         self.send_header('Content-Type', mime)
