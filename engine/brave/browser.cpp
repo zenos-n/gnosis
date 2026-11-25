@@ -532,7 +532,7 @@ public:
       // CustomScrollbar's class-local overlay patch also needs the native
       // overlay theme so visibility, hit testing and fade timers agree.
       std::string("--enable-features=FileSystemAccessAPI,BraveWebBluetoothAPI,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder,OverlayScrollbar:mode/overlay") + (composited() ? ",WaylandExternalBeginFrameSource,WaylandUnscaledTouchpadScrolling:scroll_scaling_factor/1" : ""),
-      "--enable-blink-features=WebBluetooth,MiddleClickAutoscroll",
+      "--enable-blink-features=WebBluetooth,MiddleClickAutoscroll,CanvasHDR,CanvasToneMapping,CanvasGlobalHDRHeadroom,WebGLToneMapping",
       // The pinned Brave's GTK4 startup calls a missing toolkit entry point.
       "--gtk-version=3",
       "--password-store=basic", "--window-size=1000,700", "--window-position=-16000,-16000"};

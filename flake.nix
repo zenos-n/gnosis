@@ -31,7 +31,7 @@
       };
     }) braveSeries.sources);
   in {
-    packages.${system} = { default = package; gnosis = package; cef-sdk = package.cefSdk; brave-native-ui = nativeBrave; };
+    packages.${system} = { default = package; gnosis = package; compositor-probe = compositorProbe; cef-sdk = package.cefSdk; brave-native-ui = nativeBrave; };
     apps.${system} = {
       default = { type = "app"; program = "${package}/bin/gnosis"; };
       mcp = { type = "app"; program = "${package}/bin/gnosis-mcp"; };

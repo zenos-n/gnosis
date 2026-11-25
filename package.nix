@@ -2,12 +2,9 @@
 let
   lib = pkgs.lib;
   system = "x86_64-linux";
-  gnosisGtk = pkgs.gtk4.overrideAttrs (old: {
-    patches = (old.patches or []) ++ [
-      ./patches/gtk4-x11-ignore-stale-selection-clear.patch
-      ./patches/gtk4-wayland-follow-fastest-intersecting-output.patch
-    ];
-  });
+  displayLibraries = import ./engine/brave/display-libraries.nix { inherit pkgs; };
+  gnosisGtk = displayLibraries.gtk;
+  gnosisWlroots = displayLibraries.wlroots;
   uiLibraries = with pkgs; [ gtk4 libadwaita json-glib libepoxy fontconfig freetype libsodium libsecret libsoup_3 qrencode ];
   chromiumLibraries = with pkgs; [
     stdenv.cc.cc.lib glib nss nspr dbus at-spi2-core systemd
@@ -116,7 +113,7 @@ let
       if input == pkgs.gtk4.dev then gnosisGtk.dev
       else if input == pkgs.gtk4 then gnosisGtk
       else input
-    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy pkgs.wlroots_0_19 pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode ] ++ chromiumLibraries;
+    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy gnosisWlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode ] ++ chromiumLibraries;
     preConfigure = (old.preConfigure or "") + ''
       export PKG_CONFIG_PATH="${gnosisGtk.dev}/lib/pkgconfig:''${PKG_CONFIG_PATH-}"
       test "$(pkg-config --variable=libdir gtk4)" = "${lib.getLib gnosisGtk}/lib"

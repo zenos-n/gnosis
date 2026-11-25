@@ -31,6 +31,7 @@ static GdkTexture *largest_texture(GskRenderNode *node, double *width, double *h
       return GDK_TEXTURE(g_object_ref(gsk_render_node_get_node_type(node) == GSK_TEXTURE_NODE ?
         gsk_texture_node_get_texture(node) : gsk_texture_scale_node_get_texture(node)));
     }
+    case GSK_SUBSURFACE_NODE: return largest_texture(gsk_subsurface_node_get_child(node), width, height);
     case GSK_TRANSFORM_NODE: {
       auto *texture = largest_texture(gsk_transform_node_get_child(node), width, height);
       float xx, yx, xy, yy, dx, dy;

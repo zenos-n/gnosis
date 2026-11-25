@@ -59,6 +59,7 @@ static void activate(GtkApplication *application, gpointer data) {
 }
 int main(int argc, char **argv) {
   struct rlimit no_core = {0, 0}; if (setrlimit(RLIMIT_CORE, &no_core)) return 1;
+  g_setenv("GNOSIS_COLOR_MANAGEMENT", "1", TRUE);
   url = argc > 1 ? argv[1] : "https://browserbench.org/";
   AdwApplication *app = adw_application_new("com.neg-zero.Gnosis.CompositorProbe", G_APPLICATION_NON_UNIQUE);
   g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);

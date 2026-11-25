@@ -46,6 +46,7 @@ scanner = find_program('wayland-scanner')
 protocol_dir = dependency('wayland-protocols').get_variable(pkgconfig: 'pkgdatadir')
 compositor_protocols = []
 foreach item : [
+  ['staging/color-management/color-management-v1.xml', 'color-management-v1-protocol.h', 'server-header'],
   ['staging/cursor-shape/cursor-shape-v1.xml', 'cursor-shape-v1-protocol.h', 'server-header'],
   ['stable/xdg-shell/xdg-shell.xml', 'xdg-shell-protocol.h', 'server-header'],
   ['unstable/xdg-decoration/xdg-decoration-unstable-v1.xml', 'xdg-decoration-unstable-v1-protocol.h', 'server-header'],

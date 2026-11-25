@@ -4,6 +4,7 @@
  */
 #define WLR_USE_UNSTABLE
 #include "compositor.h"
+#include "display-state.h"
 #include "outer-pointer.h"
 #include "clipboard-bridge.h"
 #include "wayland-source.h"
@@ -22,6 +23,7 @@
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_color_management_v1.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
@@ -44,6 +46,10 @@
 #include <gdk/wayland/gdkwayland.h>
 
 typedef struct {
+  GdkMonitor *monitor;
+  struct wlr_output *output;
+} MonitorOutput;
+typedef struct {
   struct wl_list link;
   GnosisCompositorView *host;
   GnosisCompositor *server;
@@ -53,6 +59,8 @@ typedef struct {
   struct wl_listener commit, map, unmap, destroy, maximize, fullscreen, title;
   int requested_width, requested_height;
   double preferred_scale;
+  struct wlr_image_description_v1_data color;
+  MonitorOutput *monitor;
   GWeakRef fullscreen_window;
   gboolean owns_fullscreen;
   gboolean content_fullscreen;
@@ -64,6 +72,7 @@ typedef struct {
   GnosisCompositor *server;
   struct wlr_surface *surface;
   struct wl_listener commit, destroy;
+  gpointer offload;
 } Surface;
 typedef struct {
   struct wlr_xdg_popup *popup;
@@ -80,7 +89,9 @@ struct _GnosisCompositor {
   struct wl_display *display;
   struct wlr_backend *backend;
   struct wlr_renderer *renderer;
-  struct wlr_output *output;
+  GPtrArray *outputs;
+  struct wlr_output_layout *output_layout;
+  struct wlr_color_manager_v1 *colors;
   struct wlr_seat *seat;
   struct wlr_text_input_manager_v3 *text_inputs;
   struct wl_listener new_text_input, text_input_focus;
@@ -141,6 +152,8 @@ static void setup_drop_target(GnosisCompositorView *self);
 static void request_drag(struct wl_listener *listener, void *data);
 static GnosisCompositorView *pointer_host(GnosisCompositor *server);
 static void update_cursor(GnosisCompositor *server);
+static void sync_view_color(View *view);
+static void release_surface_offload(struct wlr_surface *surface, int x, int y, void *data);
 static void cancel_touches(GnosisCompositorView *self);
 static void cancel_swipe(GnosisCompositorView *self);
 static void update_swipe(GnosisCompositorView *self, double x);
@@ -340,6 +353,7 @@ static void focus_entered(GtkEventControllerFocus *controller, GnosisCompositorV
     self->server->keyboard.keycodes, self->server->keyboard.num_keycodes, &self->server->keyboard.modifiers);
 }
 static void unmapped(GtkWidget *widget, GnosisCompositorView *self) {
+  if (self->active) wlr_xdg_surface_for_each_surface(self->active->toplevel->base, release_surface_offload, NULL);
   cancel_swipe(self);
   cancel_touches(self);
   cancel_view_drag(self);
@@ -360,6 +374,8 @@ static void release_texture(gpointer data) {
   // A source always defers the release to GTK's main-loop dispatch.
   g_idle_add_full(G_PRIORITY_DEFAULT, release_buffer, data, NULL);
 }
+#include "monitor-state.inc"
+#include "color-state.inc"
 static GdkTexture *surface_texture(GnosisCompositorView *self, struct wlr_surface *surface) {
   if (!surface->buffer || !surface->buffer->source) return NULL;
   struct wlr_buffer *source = surface->buffer->source;
@@ -373,6 +389,8 @@ static GdkTexture *surface_texture(GnosisCompositorView *self, struct wlr_surfac
     gdk_dmabuf_texture_builder_set_modifier(builder, dmabuf.modifier);
     gdk_dmabuf_texture_builder_set_n_planes(builder, dmabuf.n_planes);
     gdk_dmabuf_texture_builder_set_premultiplied(builder, TRUE);
+    g_autoptr(GdkColorState) color = surface_color(surface);
+    gdk_dmabuf_texture_builder_set_color_state(builder, color);
     for (int i = 0; i < dmabuf.n_planes; i++) {
       gdk_dmabuf_texture_builder_set_fd(builder, i, dmabuf.fd[i]);
       gdk_dmabuf_texture_builder_set_offset(builder, i, dmabuf.offset[i]);
@@ -401,7 +419,16 @@ static GdkTexture *surface_texture(GnosisCompositorView *self, struct wlr_surfac
   else if (format == DRM_FORMAT_XRGB8888) memory = GDK_MEMORY_B8G8R8X8;
   else { wlr_buffer_end_data_ptr_access(source); return NULL; }
   GBytes *bytes = g_bytes_new(pixels, stride * source->height);
-  GdkTexture *texture = gdk_memory_texture_new(source->width, source->height, memory, bytes, stride);
+  GdkMemoryTextureBuilder *builder = gdk_memory_texture_builder_new();
+  gdk_memory_texture_builder_set_width(builder, source->width);
+  gdk_memory_texture_builder_set_height(builder, source->height);
+  gdk_memory_texture_builder_set_format(builder, memory);
+  gdk_memory_texture_builder_set_bytes(builder, bytes);
+  gdk_memory_texture_builder_set_stride(builder, stride);
+  g_autoptr(GdkColorState) color = surface_color(surface);
+  gdk_memory_texture_builder_set_color_state(builder, color);
+  GdkTexture *texture = gdk_memory_texture_builder_build(builder);
+  g_object_unref(builder);
   g_bytes_unref(bytes); wlr_buffer_end_data_ptr_access(source);
   if (!self->logged_shm) { self->logged_shm = TRUE; g_message("Wayland client supplied a shared-memory buffer"); }
   return texture;
@@ -419,9 +446,43 @@ static void snapshot_surface(struct wlr_surface *surface, int x, int y, void *da
   graphene_rect_t clip = GRAPHENE_RECT_INIT(px, py, surface->current.width, surface->current.height);
   graphene_rect_t bounds = GRAPHENE_RECT_INIT(px - source.x * sx, py - source.y * sy,
     gdk_texture_get_width(texture) * sx, gdk_texture_get_height(texture) * sy);
-  gtk_snapshot_push_clip(s->snapshot, &clip);
+  Surface *state = surface->data;
+  GtkWidget *widget = GTK_WIDGET(s->host);
+  GtkNative *native = gtk_widget_get_native(widget);
+  GdkSurface *outer = native ? gtk_native_get_surface(native) : NULL;
+  graphene_rect_t safe = clip;
+  if (!gnosis_gtk_browser_surface_safe_rect(s->snapshot, widget, &safe)) safe = clip;
+  pixman_box32_t opaque_box = {(int)floor(safe.origin.x - px), (int)floor(safe.origin.y - py),
+    (int)ceil(safe.origin.x + safe.size.width - px), (int)ceil(safe.origin.y + safe.size.height - py)};
+  gboolean opaque = pixman_region32_contains_rectangle(&surface->opaque_region, &opaque_box) == PIXMAN_REGION_IN;
+  if (!opaque) safe = clip;
+  gboolean partial = !graphene_rect_equal(&safe, &clip);
+  if (partial) {
+    const graphene_rect_t edges[] = {
+      GRAPHENE_RECT_INIT(clip.origin.x, clip.origin.y, clip.size.width, safe.origin.y - clip.origin.y),
+      GRAPHENE_RECT_INIT(clip.origin.x, safe.origin.y + safe.size.height, clip.size.width,
+        clip.origin.y + clip.size.height - safe.origin.y - safe.size.height),
+      GRAPHENE_RECT_INIT(clip.origin.x, safe.origin.y, safe.origin.x - clip.origin.x, safe.size.height),
+      GRAPHENE_RECT_INIT(safe.origin.x + safe.size.width, safe.origin.y,
+        clip.origin.x + clip.size.width - safe.origin.x - safe.size.width, safe.size.height),
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(edges); i++) if (edges[i].size.width > 0 && edges[i].size.height > 0) {
+      gtk_snapshot_push_clip(s->snapshot, &edges[i]);
+      gtk_snapshot_append_texture(s->snapshot, texture, &bounds);
+      gtk_snapshot_pop(s->snapshot);
+    }
+  }
+  gboolean offloaded = state && outer && GDK_IS_WAYLAND_SURFACE(outer) &&
+    gnosis_gtk_snapshot_push_browser_surface(s->snapshot, outer, &state->offload);
+  gtk_snapshot_push_clip(s->snapshot, &safe);
+  if (opaque && offloaded) {
+    const GdkRGBA black = {0, 0, 0, 1};
+    gtk_snapshot_append_color(s->snapshot, &black, &safe);
+  }
   gtk_snapshot_append_texture(s->snapshot, texture, &bounds);
-  gtk_snapshot_pop(s->snapshot); g_object_unref(texture);
+  gtk_snapshot_pop(s->snapshot);
+  if (offloaded) gtk_snapshot_pop(s->snapshot);
+  g_object_unref(texture);
   struct wlr_presentation_feedback *feedback = wlr_presentation_surface_sampled(surface);
   if (feedback) {
     PresentedFrame *pending = g_new0(PresentedFrame, 1);
@@ -458,15 +519,17 @@ static void finish_presentations(GnosisCompositorView *self, GdkFrameClock *cloc
     if (timings && !gdk_frame_timings_get_complete(timings)) break;
     gint64 time = timings ? gdk_frame_timings_get_presentation_time(timings) : 0;
     gint64 interval = timings ? gdk_frame_timings_get_refresh_interval(timings) : 0;
-    if (time > 0) {
+    if (time > 0 && self->active && self->active->monitor) {
+      guint32 refresh = interval > 0 ? (uint32_t)(interval * 1000) : 0, flags = 1;
+      if (timings) gnosis_gdk_frame_timings_get_presentation(timings, &refresh, &flags);
       struct wlr_presentation_event event = {
-        .output = self->server->output,
+        .output = self->active && self->active->monitor ? self->active->monitor->output : NULL,
         .tv_sec = time / G_USEC_PER_SEC, .tv_nsec = (time % G_USEC_PER_SEC) * 1000,
-        .refresh = interval > 0 ? (uint32_t)(interval * 1000) : 0,
+        .refresh = refresh,
         .seq = (uint64_t)pending->frame,
         // GTK supplies presentation timing. Do not claim hardware clock,
         // direct scanout, or zero-copy guarantees for the nested surface.
-        .flags = 1, /* WP_PRESENTATION_FEEDBACK_KIND_VSYNC */
+        .flags = flags & (1 | 16), /* vsync and variable_rate; never claim direct scanout */
       };
       wlr_presentation_feedback_send_presented(pending->feedback, &event);
       if (interval > 0 && self->last_reported_interval != interval) {
@@ -484,25 +547,6 @@ static void discard_presentations(GnosisCompositorView *self) {
     wlr_presentation_feedback_destroy(pending->feedback); g_free(pending);
   }
 }
-static void sync_output_refresh(GnosisCompositor *server) {
-  int refresh = 0;
-  // A process currently shares one nested output. Use the fastest monitor of
-  // its mapped content views; each view's callbacks still follow its GTK clock.
-  for (guint i = 0; i < server->hosts->len; i++) {
-    GtkWidget *host = g_ptr_array_index(server->hosts, i);
-    if (!gtk_widget_get_mapped(host)) continue;
-    GtkNative *native = gtk_widget_get_native(host);
-    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
-    GdkMonitor *monitor = surface ? gdk_display_get_monitor_at_surface(gtk_widget_get_display(host), surface) : NULL;
-    if (monitor) refresh = MAX(refresh, gdk_monitor_get_refresh_rate(monitor));
-  }
-  if (refresh <= 0 || refresh == server->output->refresh) return;
-  struct wlr_output_state state; wlr_output_state_init(&state);
-  wlr_output_state_set_custom_mode(&state, server->output->width, server->output->height, refresh);
-  gboolean committed = wlr_output_commit_state(server->output, &state);
-  wlr_output_state_finish(&state);
-  if (committed) g_message("Nested output refresh follows GTK monitor: %.3f Hz", refresh / 1000.0);
-}
 static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data) {
   (void)data;
   GnosisCompositorView *self = GNOSIS_COMPOSITOR_VIEW(widget);
@@ -514,6 +558,7 @@ static gboolean tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data) {
     if (self->active->toplevel->base->initialized) configure(self->active);
     finish_presentations(self, clock);
     sync_output_refresh(self->server);
+    sync_view_color(self->active);
     gint64 usec = gdk_frame_clock_get_frame_time(clock);
     if (g_getenv("GNOSIS_TRACE_FRAMES")) {
       if (!self->trace_start) self->trace_start = usec;
@@ -570,6 +615,8 @@ static void surface_commit(struct wl_listener *listener, void *data) {
     if (host->active && host->active->toplevel->base->surface == root) {
       double scale = host_scale(host);
       scale_surface(s->surface, 0, 0, &scale);
+      wlr_color_manager_v1_set_surface_preferred_image_description(s->server->colors, s->surface, &host->active->color);
+      if (host->active->monitor) enter_monitor_surface(s->surface, 0, 0, host->active->monitor);
       gtk_widget_queue_draw(GTK_WIDGET(host));
     }
   }
@@ -577,6 +624,8 @@ static void surface_commit(struct wl_listener *listener, void *data) {
 static void surface_destroy(struct wl_listener *listener, void *data) {
   (void)data; Surface *s = wl_container_of(listener, s, destroy);
   if (s->surface == s->server->cursor_surface) s->server->cursor_surface = NULL;
+  gnosis_gtk_browser_surface_release(&s->offload);
+  s->surface->data = NULL;
   wl_list_remove(&s->commit.link); wl_list_remove(&s->destroy.link); g_free(s);
 }
 
@@ -648,6 +697,7 @@ static void request_cursor_shape(struct wl_listener *listener, void *data) {
 static void new_surface(struct wl_listener *listener, void *data) {
   GnosisCompositor *server = wl_container_of(listener, server, new_surface);
   struct wlr_surface *surface = data; Surface *s = g_new0(Surface, 1); s->server = server; s->surface = surface;
+  surface->data = s;
   listen(&surface->events.commit, &s->commit, surface_commit);
   listen(&surface->events.destroy, &s->destroy, surface_destroy);
 }
@@ -713,7 +763,7 @@ static void view_map(struct wl_listener *listener, void *data) {
     g_warning("Wayland surface has no registered GTK tab: %s", view->toplevel->app_id ? view->toplevel->app_id : "(unnamed)");
     return;
   }
-  wlr_surface_send_enter(view->toplevel->base->surface, view->server->output);
+  sync_view_color(view);
   configure(view);
   gtk_widget_queue_allocate(GTK_WIDGET(view->host));
   gtk_widget_queue_draw(GTK_WIDGET(view->host));
@@ -782,6 +832,7 @@ static void view_title(struct wl_listener *listener, void *data) {
 static void new_toplevel(struct wl_listener *listener, void *data) {
   GnosisCompositor *server = wl_container_of(listener, server, new_toplevel);
   struct wlr_xdg_toplevel *toplevel = data; View *v = g_new0(View, 1);
+  v->color = srgb_description();
   v->server = server; v->toplevel = toplevel; wl_list_insert(&server->views, &v->link);
   g_weak_ref_init(&v->fullscreen_window, NULL);
   toplevel->base->data = v;
@@ -1029,6 +1080,7 @@ static void server_dispose(GObject *object) {
     if (self->directory) rmdir(self->directory);
     g_clear_pointer(&self->socket, g_free); g_clear_pointer(&self->directory, g_free);
   }
+  g_clear_pointer(&self->outputs, g_ptr_array_unref);
   g_clear_pointer(&self->hosts, g_ptr_array_unref);
   G_OBJECT_CLASS(gnosis_compositor_parent_class)->dispose(object);
 }
@@ -1120,6 +1172,19 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   listen(&compositor->events.new_surface, &self->new_surface, new_surface);
   wlr_subcompositor_create(self->display); wlr_viewporter_create(self->display);
   if (!wlr_fractional_scale_manager_v1_create(self->display, 1)) goto failed;
+  static const enum wp_color_manager_v1_render_intent intents[] = {WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL};
+  static const enum wp_color_manager_v1_transfer_function transfers[] = {
+    WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ};
+  static const enum wp_color_manager_v1_primaries primaries[] = {
+    WP_COLOR_MANAGER_V1_PRIMARIES_SRGB, WP_COLOR_MANAGER_V1_PRIMARIES_BT2020};
+  const struct wlr_color_manager_v1_options color_options = {
+    .features = {.parametric = TRUE, .set_mastering_display_primaries = TRUE},
+    .render_intents = intents, .render_intents_len = G_N_ELEMENTS(intents),
+    .transfer_functions = transfers, .transfer_functions_len = G_N_ELEMENTS(transfers),
+    .primaries = primaries, .primaries_len = G_N_ELEMENTS(primaries),
+  };
+  self->colors = wlr_color_manager_v1_create(self->display, 1, &color_options);
+  if (!self->colors) goto failed;
   wlr_data_device_manager_create(self->display);
   if (!wlr_linux_dmabuf_v1_create_with_renderer(self->display, 4, self->renderer)) goto failed;
   struct wlr_xdg_shell *shell = wlr_xdg_shell_create(self->display, 6);
@@ -1130,19 +1195,17 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   self->backend = wlr_headless_backend_create(wl_display_get_event_loop(self->display));
   if (!self->backend) goto failed;
   if (!wlr_presentation_create(self->display, self->backend, 2)) goto failed;
-  self->output = wlr_headless_add_output(self->backend, 1280, 800);
-  if (!self->output) goto failed;
-  struct wlr_output_state state; wlr_output_state_init(&state);
+  self->output_layout = wlr_output_layout_create(self->display);
+  self->outputs = g_ptr_array_new_with_free_func(monitor_output_free);
   GListModel *monitors = gdk_display_get_monitors(gdk_display_get_default());
-  GdkMonitor *monitor = g_list_model_get_item(monitors, 0);
-  int refresh = monitor ? gdk_monitor_get_refresh_rate(monitor) : 0;
-  g_clear_object(&monitor);
-  wlr_output_state_set_enabled(&state, TRUE); wlr_output_state_set_custom_mode(&state, 1280, 800, refresh > 0 ? refresh : 60000);
-  gboolean committed = wlr_output_commit_state(self->output, &state); wlr_output_state_finish(&state);
-  if (!committed || !wlr_backend_start(self->backend)) goto failed;
-  struct wlr_output_layout *layout = wlr_output_layout_create(self->display);
-  wlr_output_layout_add(layout, self->output, 0, 0); wlr_output_create_global(self->output, self->display);
-  wlr_xdg_output_manager_v1_create(self->display, layout);
+  for (guint i = 0; i < g_list_model_get_n_items(monitors); i++) {
+    GdkMonitor *monitor = g_list_model_get_item(monitors, i);
+    MonitorOutput *output = monitor_output(self, monitor);
+    g_object_unref(monitor);
+    if (!output) goto failed;
+  }
+  if (!wlr_backend_start(self->backend)) goto failed;
+  wlr_xdg_output_manager_v1_create(self->display, self->output_layout);
   self->seat = wlr_seat_create(self->display, "Gnosis GTK seat");
   self->seat->data = self;
   self->text_inputs = wlr_text_input_manager_v3_create(self->display);

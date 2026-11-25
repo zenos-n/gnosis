@@ -289,3 +289,31 @@ new default-on native preference and its disabled behavior, selection changes
 while closure is pending, and canceling a background native beforeunload warning.
 Background closure must not emit a selected-page change, including while its
 warning is visible. Tab removal feedback must arrive within 400 ms.
+
+`native-hdr-gtk-test.py` runs Gnosis on its own headless Mutter display, private
+D-Bus and temporary HOME/profile. It never moves, resizes or changes the mode of
+a physical display. Compile `native-display-feedback-probe.c` with
+`gtk4 wlroots-0.19 wayland-server` cflags into an object (generate and include
+the pinned color-management server protocol header), then link that object
+into `native-hdr-gtk-probe.cpp` using the normal C++ preload flags and
+`-Iengine/brave`. Pass `--gnosis`, `--probe`, `--mutter` and `--ffmpeg` (FFmpeg
+8.1.2 with libvpx); run once with `--scale 1` and once with
+`--scale 1.6666666666666667`.
+
+The fixture injects SDR/PQ output descriptions at the GTK-to-nested-display
+boundary. Chromium must update its actual HDR media query, preserve highlights
+in a generated PQ PNG and playing 10-bit VP9 video, and attach PQ native
+subsurfaces in windowed and fullscreen modes. The driver checks actual GTK
+offload attachment logs, rather than accepting a tagged render node alone.
+Presentation checks require real outer feedback plus injected variable and
+unknown refresh values; nested feedback must preserve those values while
+removing hardware/direct-scanout claims. Injected P3 target primaries and
+MaxCLL/MaxFALL must reach the nested surfaces, and the extended float16 canvas
+API must be available. These tests do not establish physical
+monitor brightness or that GNOME has enabled hardware VRR.
+
+The display patches are app-local and version-checked against GTK 4.22.4 and
+wlroots 0.19.3. The shell stays sRGB/8-bit; browser content retains its negotiated
+color state on native subsurfaces. Unsupported transforms, transparency or
+occluding effects use GTK's normal rendering fallback. Actual HDR and adaptive
+sync still depend on the outer compositor, display configuration and driver.

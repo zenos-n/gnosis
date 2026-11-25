@@ -1,12 +1,16 @@
 { pkgs }:
-pkgs.stdenv.mkDerivation {
+let displayLibraries = import ./display-libraries.nix { inherit pkgs; };
+in pkgs.stdenv.mkDerivation {
   pname = "gnosis-compositor-probe";
   version = "0.0.1";
   src = ./.;
   nativeBuildInputs = [ pkgs.pkg-config pkgs.wrapGAppsHook4 pkgs.wayland-scanner ];
-  buildInputs = [ pkgs.gtk4 pkgs.libadwaita pkgs.json-glib pkgs.libxml2 pkgs.wlroots_0_19 pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.pixman pkgs.libglvnd ];
+  buildInputs = [ displayLibraries.gtk pkgs.libadwaita pkgs.json-glib pkgs.libxml2 displayLibraries.wlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.pixman pkgs.libglvnd ];
   dontConfigure = true;
   buildPhase = ''
+    export PKG_CONFIG_PATH="${displayLibraries.gtk.dev}/lib/pkgconfig:''${PKG_CONFIG_PATH-}"
+    test "$(pkg-config --variable=libdir gtk4)" = "${pkgs.lib.getLib displayLibraries.gtk}/lib"
+    wayland-scanner server-header ${pkgs.wayland-protocols}/share/wayland-protocols/staging/color-management/color-management-v1.xml color-management-v1-protocol.h
     wayland-scanner server-header ${pkgs.wayland-protocols}/share/wayland-protocols/staging/cursor-shape/cursor-shape-v1.xml cursor-shape-v1-protocol.h
     wayland-scanner server-header ${pkgs.wayland-protocols}/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml xdg-shell-protocol.h
     wayland-scanner server-header ${pkgs.wayland-protocols}/share/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml xdg-decoration-unstable-v1-protocol.h

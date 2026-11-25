@@ -1,0 +1,403 @@
+--- a/gdk/wayland/gdkdisplay-wayland.c
++++ b/gdk/wayland/gdkdisplay-wayland.c
+@@ -124,7 +124,7 @@
+ #define ACTIVATION_VERSION              1
+ #define FRACTIONAL_SCALE_VERSION        1
+ #define VIEWPORTER_VERSION              1
+-#define PRESENTATION_VERSION            1
++#define PRESENTATION_VERSION 2
+ #define SINGLE_PIXEL_BUFFER_VERSION     1
+ #define SYSTEM_BELL_VERSION             1
+ #define CURSOR_SHAPE_VERSION            1
+@@ -178,7 +178,8 @@
+         p++;
+     }
+ 
+-  if (!GDK_DISPLAY_DEBUG_CHECK (GDK_DISPLAY (display_wayland), COLOR_MANAGEMENT))
++  if (!GDK_DISPLAY_DEBUG_CHECK (GDK_DISPLAY (display_wayland), COLOR_MANAGEMENT) &&
++      !g_getenv ("GNOSIS_COLOR_MANAGEMENT"))
+     g_strv_builder_add (strv, wp_color_manager_v1_interface.name);
+ 
+   if (!GDK_DISPLAY_DEBUG_CHECK (GDK_DISPLAY (display_wayland), SESSION_MANAGEMENT))
+--- a/gdk/wayland/gdksurface-wayland.c
++++ b/gdk/wayland/gdksurface-wayland.c
+@@ -892,6 +892,13 @@
+                      "preferred color state, surface %p color state %s",
+                      self, gdk_color_state_get_name (color_state));
+ 
++  if (g_getenv ("GNOSIS_COLOR_MANAGEMENT"))
++    {
++      g_object_set_data_full (G_OBJECT (self), "gnosis-preferred-color-state",
++                              gdk_color_state_ref (color_state),
++                              (GDestroyNotify) gdk_color_state_unref);
++      color_state = GDK_COLOR_STATE_SRGB;
++    }
+   gdk_surface_set_color_state (GDK_SURFACE (self), color_state);
+ 
+   self->color_state_changed = TRUE;
+@@ -1418,3 +1425,19 @@
+ 
+ /* }}}} */
+ /* vim:set foldmethod=marker: */
++
++gboolean
++gnosis_gdk_wayland_surface_get_target (GdkSurface *surface, gint32 primaries[8], guint32 light[2])
++{
++  return gnosis_gdk_wayland_color_get_target (GDK_WAYLAND_SURFACE (surface)->display_server.color, primaries, light);
++}
++
++/* Keep shell rendering SDR while exposing the preferred display metadata. */
++GdkColorState *
++gnosis_gdk_wayland_surface_get_preferred (GdkSurface *surface, guint32 values[5])
++{
++  GdkColorState *state = g_object_get_data (G_OBJECT (surface), "gnosis-preferred-color-state");
++  gnosis_gdk_wayland_color_get_luminances (GDK_WAYLAND_SURFACE (surface)->display_server.color, values);
++  return state ? state : GDK_COLOR_STATE_SRGB;
++}
++
+--- a/gdk/wayland/gdkwaylandsurface.h
++++ b/gdk/wayland/gdkwaylandsurface.h
+@@ -46,5 +46,11 @@
+ GDK_AVAILABLE_IN_4_18
+ void                     gdk_wayland_surface_force_next_commit    (GdkSurface *surface);
+ 
++GDK_AVAILABLE_IN_ALL
++gboolean gnosis_gdk_wayland_surface_get_target (GdkSurface *surface, gint32 primaries[8], guint32 light[2]);
++
++GDK_AVAILABLE_IN_ALL
++GdkColorState *gnosis_gdk_wayland_surface_get_preferred (GdkSurface *surface, guint32 values[5]);
++
+ G_END_DECLS
+ 
+--- a/gdk/wayland/gdkwaylandcolor.c
++++ b/gdk/wayland/gdkwaylandcolor.c
+@@ -981,9 +981,9 @@
+   ImageDescription *desc = data;
+ 
+   desc->target_r_x = r_x; desc->target_r_y = r_y;
+-  desc->target_g_x = g_x; desc->target_r_y = g_y;
+-  desc->target_b_x = b_x; desc->target_r_y = b_y;
+-  desc->target_w_x = w_x; desc->target_r_y = w_y;
++  desc->target_g_x = g_x; desc->target_g_y = g_y;
++  desc->target_b_x = b_x; desc->target_b_y = b_y;
++  desc->target_w_x = w_x; desc->target_w_y = w_y;
+   desc->has_target_primaries = 1;
+ }
+ 
+@@ -1064,7 +1064,7 @@
+   g_assert (self->current_desc == desc);
+ 
+   cs = g_hash_table_lookup (self->color->id_to_cs, GUINT_TO_POINTER (identity));
+-  if (cs)
++  if (cs && !g_getenv ("GNOSIS_COLOR_MANAGEMENT"))
+     {
+       self->callback (self, cs, self->data);
+ 
+@@ -1342,3 +1342,34 @@
+ 
+   return TRUE;
+ }
++
++/* Preserve negotiated luminance metadata for Gnosis's nested display. */
++void
++gnosis_gdk_wayland_color_get_luminances (GdkWaylandColorSurface *self,
++                                        guint32                values[5])
++{
++  ImageDescription *desc = self ? self->current_desc : NULL;
++  memset (values, 0, 5 * sizeof (guint32));
++  if (!desc || !desc->has_luminances)
++    return;
++  values[0] = desc->min_lum;
++  values[1] = desc->max_lum;
++  values[2] = desc->ref_lum;
++  values[3] = desc->has_target_luminance ? desc->target_min_lum : desc->min_lum;
++  values[4] = desc->has_target_luminance ? desc->target_max_lum : desc->max_lum;
++}
++
++gboolean
++gnosis_gdk_wayland_color_get_target (GdkWaylandColorSurface *self, gint32 primaries[8], guint32 light[2])
++{
++  ImageDescription *desc = self ? self->current_desc : NULL;
++  memset (primaries, 0, 8 * sizeof (gint32));
++  light[0] = desc && desc->has_target_max_cll ? desc->target_max_cll : 0;
++  light[1] = desc && desc->has_target_max_fall ? desc->target_max_fall : 0;
++  if (!desc || !desc->has_target_primaries)
++    return FALSE;
++  gint32 values[] = {desc->target_r_x, desc->target_r_y, desc->target_g_x, desc->target_g_y,
++                     desc->target_b_x, desc->target_b_y, desc->target_w_x, desc->target_w_y};
++  memcpy (primaries, values, sizeof values);
++  return TRUE;
++}
+--- a/gdk/wayland/gdkwaylandcolor-private.h
++++ b/gdk/wayland/gdkwaylandcolor-private.h
+@@ -50,3 +50,7 @@
+                                                                  uint32_t                fourcc,
+                                                                  gboolean                premultiplied);
+ void              gdk_wayland_color_surface_unset_color_state   (GdkWaylandColorSurface *self);
++
++gboolean gnosis_gdk_wayland_color_get_target (GdkWaylandColorSurface *self, gint32 primaries[8], guint32 light[2]);
++
++void gnosis_gdk_wayland_color_get_luminances (GdkWaylandColorSurface *self, guint32 values[5]);
+--- a/gdk/wayland/gdkwaylandpresentationtime.c
++++ b/gdk/wayland/gdkwaylandpresentationtime.c
+@@ -93,6 +93,9 @@
+   if ((timings = gdk_frame_clock_get_timings (frame->frame_clock, frame->frame_number)))
+     {
+       timings->presentation_time = time_from_wayland (tv_sec_hi, tv_sec_lo, tv_nsec);
++      timings->gnosis_presentation_refresh = refresh;
++      timings->gnosis_presentation_flags = flags;
++      timings->gnosis_presentation_valid = TRUE;
+       timings->complete = TRUE;
+     }
+ 
+--- a/gdk/gdkframeclockprivate.h
++++ b/gdk/gdkframeclockprivate.h
+@@ -95,6 +95,9 @@
+   gint64 refresh_interval;
+   gint64 predicted_presentation_time;
+ 
++  guint32 gnosis_presentation_refresh, gnosis_presentation_flags;
++  gboolean gnosis_presentation_valid;
++
+   gint64 layout_start_time;
+   gint64 paint_start_time;
+   gint64 frame_end_time;
+--- a/gdk/gdkframetimings.c
++++ b/gdk/gdkframetimings.c
+@@ -235,3 +235,13 @@
+ 
+   return timings->refresh_interval;
+ }
++
++gboolean
++gnosis_gdk_frame_timings_get_presentation (GdkFrameTimings *timings, guint32 *refresh, guint32 *flags)
++{
++  if (!timings->gnosis_presentation_valid)
++    return FALSE;
++  *refresh = timings->gnosis_presentation_refresh;
++  *flags = timings->gnosis_presentation_flags;
++  return TRUE;
++}
+--- a/gdk/gdkframetimings.h
++++ b/gdk/gdkframetimings.h
+@@ -51,5 +51,8 @@
+ 
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GdkFrameTimings, gdk_frame_timings_unref)
+ 
++GDK_AVAILABLE_IN_ALL
++gboolean gnosis_gdk_frame_timings_get_presentation (GdkFrameTimings *timings, guint32 *refresh, guint32 *flags);
++
+ G_END_DECLS
+ 
+--- a/gtk/gtkgraphicsoffload.c
++++ b/gtk/gtkgraphicsoffload.c
+@@ -454,3 +454,36 @@
+ 
+   return self->black_background;
+ }
++
++/* Gnosis has one texture per nested wl_surface, rather than one video widget. */
++gboolean
++gnosis_gtk_snapshot_push_browser_surface (GtkSnapshot *snapshot, GdkSurface *surface, gpointer *cached)
++{
++  GdkSubsurface *subsurface = *cached;
++  if (subsurface && gdk_subsurface_get_parent (subsurface) != surface)
++    {
++      gdk_subsurface_detach (subsurface);
++      g_clear_object (&subsurface);
++      *cached = NULL;
++    }
++  if (!subsurface)
++    {
++      subsurface = gdk_surface_create_subsurface (surface);
++      *cached = subsurface;
++    }
++  if (!subsurface)
++    return FALSE;
++  gtk_snapshot_push_subsurface (snapshot, subsurface);
++  return TRUE;
++}
++
++void
++gnosis_gtk_browser_surface_release (gpointer *cached)
++{
++  if (*cached)
++    {
++      gdk_subsurface_detach (*cached);
++      g_object_unref (*cached);
++      *cached = NULL;
++    }
++}
+--- a/gtk/gtkgraphicsoffload.h
++++ b/gtk/gtkgraphicsoffload.h
+@@ -74,4 +74,9 @@
+ GDK_AVAILABLE_IN_4_16
+ gboolean         gtk_graphics_offload_get_black_background (GtkGraphicsOffload *self);
+ 
++GDK_AVAILABLE_IN_ALL
++gboolean gnosis_gtk_snapshot_push_browser_surface (GtkSnapshot *snapshot, GdkSurface *surface, gpointer *cached);
++GDK_AVAILABLE_IN_ALL
++void gnosis_gtk_browser_surface_release (gpointer *cached);
++
+ G_END_DECLS
+--- a/gtk/gtksnapshot.c
++++ b/gtk/gtksnapshot.c
+@@ -19,6 +19,8 @@
+ 
+ #include "gtksnapshot.h"
+ #include "gtksnapshotprivate.h"
++#include "gtkwidget.h"
++#include "gtknative.h"
+ 
+ #include "gtkcsscolorvalueprivate.h"
+ #include "gtkcssshadowvalueprivate.h"
+@@ -87,6 +89,7 @@
+   guint                  n_nodes;
+ 
+   GskTransform *         transform;
++  GtkWidget *gnosis_widget;
+ 
+   GtkSnapshotCollectFunc collect_func;
+   GtkSnapshotClearFunc   clear_func;
+@@ -264,6 +267,7 @@
+   state = gtk_snapshot_states_get (&snapshot->state_stack, n_states);
+ 
+   state->transform = gsk_transform_ref (transform);
++  state->gnosis_widget = NULL;
+   state->collect_func = collect_func;
+   state->clear_func = clear_func;
+   state->start_node_index = gtk_snapshot_nodes_get_size (&snapshot->nodes);
+@@ -3494,3 +3498,84 @@
+ 
+   state->data.subsurface.subsurface = g_object_ref (subsurface);
+ }
++
++/* Widget layout transforms are applied only after its render node is collected. */
++void
++gnosis_gtk_snapshot_set_widget (GtkSnapshot *snapshot, GtkWidget *widget)
++{
++  gtk_snapshot_get_current_state (snapshot)->gnosis_widget = widget;
++}
++
++static gboolean
++gnosis_snapshot_transform (GtkWidget *widget, GtkWidget *owner, GskTransform *local,
++                           float *sx, float *sy, float *dx, float *dy)
++{
++  graphene_matrix_t matrix;
++  double xx, yx, xy, yy, x0, y0;
++  if (!owner || !gtk_widget_compute_transform (widget, owner, &matrix) ||
++      !graphene_matrix_to_2d (&matrix, &xx, &yx, &xy, &yy, &x0, &y0) ||
++      xy != 0 || yx != 0 || xx <= 0 || yy <= 0 ||
++      gsk_transform_get_category (local) < GSK_TRANSFORM_CATEGORY_2D_AFFINE)
++    return FALSE;
++  gsk_transform_to_affine (local, sx, sy, dx, dy);
++  *sx *= xx; *sy *= yy; *dx = *dx * xx + x0; *dy = *dy * yy + y0;
++  return *sx > 0 && *sy > 0;
++}
++
++/* Return an interior rectangle contained by all enclosing snapshot clips. */
++gboolean
++gnosis_gtk_browser_surface_safe_rect (GtkSnapshot *snapshot, GtkWidget *widget, graphene_rect_t *rect)
++{
++  GskTransform *local = gtk_snapshot_get_current_state (snapshot)->transform;
++  for (gsize i = gtk_snapshot_states_get_size (&snapshot->state_stack); i > 0; i--)
++    {
++      GtkSnapshotState *state = gtk_snapshot_states_get (&snapshot->state_stack, i - 1);
++      graphene_rect_t bounds;
++      float top = 0, bottom = 0;
++      if (state->collect_func == gtk_snapshot_collect_rounded_clip)
++        {
++          GskRoundedRect *box = &state->data.rounded_clip.bounds;
++          bounds = box->bounds;
++          top = MAX (box->corner[0].height, box->corner[1].height);
++          bottom = MAX (box->corner[2].height, box->corner[3].height);
++        }
++      else if (state->collect_func == gtk_snapshot_collect_clip)
++        bounds = state->data.clip.bounds;
++      else
++        continue;
++      GtkWidget *owner = NULL;
++      for (gsize j = i; j > 0 && !owner; j--)
++        owner = gtk_snapshot_states_get (&snapshot->state_stack, j - 1)->gnosis_widget;
++      float sx, sy, dx, dy;
++      if (!gnosis_snapshot_transform (widget, owner, local, &sx, &sy, &dx, &dy))
++        return FALSE;
++      graphene_rect_t inner;
++      graphene_rect_init (&inner, (bounds.origin.x - dx) / sx,
++                          (bounds.origin.y + top - dy) / sy, bounds.size.width / sx,
++                          MAX (0, bounds.size.height - top - bottom) / sy);
++      if (!graphene_rect_intersection (rect, &inner, rect))
++        return FALSE;
++    }
++  GtkNative *native = gtk_widget_get_native (widget);
++  GdkSurface *surface = native ? gtk_native_get_surface (native) : NULL;
++  float sx, sy, dx, dy;
++  if (!surface || !gnosis_snapshot_transform (widget, GTK_WIDGET (native), local, &sx, &sy, &dx, &dy))
++    return FALSE;
++  double nx, ny;
++  gtk_native_get_surface_transform (native, &nx, &ny);
++  dx += nx; dy += ny;
++  /* A destination must be integral in logical and device pixels. */
++  guint units = MAX (1, (guint) lround (gdk_surface_get_scale (surface) * 120));
++  guint a = 120, b = units;
++  while (b) { guint remainder = a % b; a = b; b = remainder; }
++  float step = 120.f / a;
++  float left = ceilf ((rect->origin.x * sx + dx) / step) * step;
++  float top = ceilf ((rect->origin.y * sy + dy) / step) * step;
++  float right = floorf (((rect->origin.x + rect->size.width) * sx + dx) / step) * step;
++  float bottom = floorf (((rect->origin.y + rect->size.height) * sy + dy) / step) * step;
++  if (right <= left || bottom <= top)
++    return FALSE;
++  graphene_rect_init (rect, (left - dx) / sx, (top - dy) / sy,
++                      (right - left) / sx, (bottom - top) / sy);
++  return TRUE;
++}
+--- a/gtk/gtksnapshot.h
++++ b/gtk/gtksnapshot.h
+@@ -275,5 +275,8 @@
+                                                          const graphene_rect_t  *bounds,
+                                                          gsize                   nth);
+ 
++GDK_AVAILABLE_IN_ALL
++gboolean gnosis_gtk_browser_surface_safe_rect (GtkSnapshot *snapshot, GtkWidget *widget, graphene_rect_t *rect);
++
+ G_END_DECLS
+ 
+--- a/gsk/gpu/gskgpurenderer.c
++++ b/gsk/gpu/gskgpurenderer.c
+@@ -19,6 +19,7 @@
+ #include "gdk/gdktextureprivate.h"
+ #include "gdk/gdkdrawcontextprivate.h"
+ #include "gdk/gdkcolorstateprivate.h"
++#include "gdk/gdksurfaceprivate.h"
+ 
+ #include <graphene.h>
+ 
+@@ -454,6 +455,9 @@
+   gsk_gpu_renderer_make_current (self);
+ 
+   depth = gsk_render_node_get_preferred_depth (root);
++  if (g_getenv ("GNOSIS_COLOR_MANAGEMENT") &&
++      gdk_color_state_equal (gdk_surface_get_color_state (gdk_draw_context_get_surface (priv->context)), GDK_COLOR_STATE_SRGB))
++    depth = GDK_MEMORY_U8;
+   frame = gsk_gpu_renderer_get_frame (self);
+   scale = gdk_surface_get_scale (gdk_draw_context_get_surface (priv->context));
+ 
+--- a/gtk/gtkwidget.c
++++ b/gtk/gtkwidget.c
+@@ -12077,6 +12077,7 @@
+   gtk_css_boxes_init (&boxes, widget);
+ 
+   gtk_snapshot_push_collect (snapshot);
++  gnosis_gtk_snapshot_set_widget (snapshot, widget);
+   gtk_snapshot_push_debug (snapshot,
+                            "RenderNode for %s %p",
+                            G_OBJECT_TYPE_NAME (widget), widget);
+--- a/gtk/gtksnapshotprivate.h
++++ b/gtk/gtksnapshotprivate.h
+@@ -106,3 +106,5 @@
+ 
+ 
+ G_END_DECLS
++
++void gnosis_gtk_snapshot_set_widget (GtkSnapshot *snapshot, GtkWidget *widget);

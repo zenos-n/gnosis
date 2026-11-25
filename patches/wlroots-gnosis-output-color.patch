@@ -1,0 +1,166 @@
+--- a/include/wlr/types/wlr_color_management_v1.h
++++ b/include/wlr/types/wlr_color_management_v1.h
+@@ -27,6 +27,9 @@
+ 	struct {
+ 		float min, max; // cd/m²
+ 	} mastering_luminance;
++
++	bool has_luminances, has_target_luminance;
++	struct wlr_color_luminances luminances, target_luminance;
+ 
+ 	uint32_t max_cll, max_fall; // cd/m², zero if unset
+ };
+@@ -89,4 +92,10 @@
+ 	struct wlr_color_manager_v1 *manager, struct wlr_surface *surface,
+ 	const struct wlr_image_description_v1_data *data);
+ 
++struct wlr_output;
++void wlr_color_manager_v1_set_output_image_description(struct wlr_color_manager_v1 *manager,
++    struct wlr_output *output, const struct wlr_image_description_v1_data *data);
++
++bool wlr_image_description_v1_data_equal(const struct wlr_image_description_v1_data *a, const struct wlr_image_description_v1_data *b);
++
+ #endif
+--- a/types/wlr_color_management_v1.c
++++ b/types/wlr_color_management_v1.c
+@@ -130,7 +130,8 @@
+ 	wlr_color_primaries_from_named(&primaries, named_primaries_to_wlr(image_desc->data.primaries_named));
+ 
+ 	struct wlr_color_luminances luminances;
+-	wlr_color_transfer_function_get_default_luminance(transfer_function_to_wlr(image_desc->data.tf_named), &luminances);
++    if (image_desc->data.has_luminances) luminances = image_desc->data.luminances;
++    else wlr_color_transfer_function_get_default_luminance(transfer_function_to_wlr(image_desc->data.tf_named), &luminances);
+ 
+ 	wp_image_description_info_v1_send_primaries_named(resource, image_desc->data.primaries_named);
+ 	wp_image_description_info_v1_send_primaries(resource,
+@@ -144,14 +145,17 @@
+ 		round(luminances.reference));
+ 	// TODO: send mastering display primaries and luminances here when we add
+ 	// support for features.set_mastering_display_primaries
++	if (image_desc->data.has_mastering_display_primaries) primaries = image_desc->data.mastering_display_primaries;
+ 	wp_image_description_info_v1_send_target_primaries(resource,
+ 		encode_cie1931_coord(primaries.red.x), encode_cie1931_coord(primaries.red.y),
+ 		encode_cie1931_coord(primaries.green.x), encode_cie1931_coord(primaries.green.y),
+ 		encode_cie1931_coord(primaries.blue.x), encode_cie1931_coord(primaries.blue.y),
+ 		encode_cie1931_coord(primaries.white.x), encode_cie1931_coord(primaries.white.y));
++    if (image_desc->data.has_target_luminance) luminances = image_desc->data.target_luminance;
+ 	wp_image_description_info_v1_send_target_luminance(resource,
+ 		round(luminances.min * 10000), round(luminances.max));
+-	// TODO: send target_max_cll and target_max_fall
++	if (image_desc->data.max_cll) wp_image_description_info_v1_send_target_max_cll(resource, image_desc->data.max_cll);
++	if (image_desc->data.max_fall) wp_image_description_info_v1_send_target_max_fall(resource, image_desc->data.max_fall);
+ 	wp_image_description_info_v1_send_done(resource);
+ 	wl_resource_destroy(resource);
+ }
+@@ -213,6 +217,18 @@
+ 	wp_image_description_v1_send_failed(resource, cause, msg);
+ }
+ 
++struct output_description {
++    struct wlr_addon addon;
++    struct wlr_image_description_v1_data data;
++};
++static void output_description_destroy(struct wlr_addon *addon) {
++    struct output_description *desc = wl_container_of(addon, desc, addon);
++    wlr_addon_finish(addon);
++    free(desc);
++}
++static const struct wlr_addon_interface output_description_impl = {
++    .name = "gnosis-color-output", .destroy = output_description_destroy,
++};
+ static const struct wp_color_management_output_v1_interface cm_output_impl;
+ 
+ static struct wlr_color_management_output_v1 *cm_output_from_resource(struct wl_resource *resource) {
+@@ -234,6 +250,11 @@
+ 		.tf_named = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB,
+ 		.primaries_named = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB,
+ 	};
++    struct wlr_addon *addon = wlr_addon_find(&cm_output->output->addons, cm_output->manager, &output_description_impl);
++    if (addon) {
++        struct output_description *desc = wl_container_of(addon, desc, addon);
++        data = desc->data;
++    }
+ 	image_desc_create_ready(cm_output->manager, cm_output_resource, id, &data, true);
+ }
+ 
+@@ -680,6 +701,7 @@
+ 	}
+ 
+ 	cm_output->manager = manager;
++	cm_output->output = output;
+ 
+ 	uint32_t version = wl_resource_get_version(manager_resource);
+ 	cm_output->resource = wl_resource_create(client,
+@@ -782,6 +804,11 @@
+ 		.primaries_named = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB,
+ 	};
+ 
++    struct wlr_addon *preferred_addon = wlr_addon_find(&surface->addons, manager, &output_description_impl);
++    if (preferred_addon) {
++        struct output_description *preferred = wl_container_of(preferred_addon, preferred, addon);
++        surface_feedback->data = preferred->data;
++    }
+ 	surface_feedback->surface_destroy.notify = surface_feedback_handle_surface_destroy;
+ 	wl_signal_add(&surface->events.destroy, &surface_feedback->surface_destroy);
+ 
+@@ -980,7 +1007,16 @@
+ void wlr_color_manager_v1_set_surface_preferred_image_description(
+ 		struct wlr_color_manager_v1 *manager, struct wlr_surface *surface,
+ 		const struct wlr_image_description_v1_data *data) {
+-	// TODO: de-duplicate identity
++    struct wlr_addon *addon = wlr_addon_find(&surface->addons, manager, &output_description_impl);
++    struct output_description *preferred;
++    if (addon) preferred = wl_container_of(addon, preferred, addon);
++    else {
++        preferred = calloc(1, sizeof(*preferred));
++        if (!preferred) return;
++        wlr_addon_init(&preferred->addon, &surface->addons, manager, &output_description_impl);
++    }
++    if (wlr_image_description_v1_data_equal(&preferred->data, data)) return;
++    preferred->data = *data;
+ 	uint32_t identity = ++manager->last_image_desc_identity;
+ 
+ 	struct wlr_color_management_surface_feedback_v1 *surface_feedback;
+@@ -992,3 +1028,42 @@
+ 		}
+ 	}
+ }
++
++void wlr_color_manager_v1_set_output_image_description(struct wlr_color_manager_v1 *manager,
++        struct wlr_output *output, const struct wlr_image_description_v1_data *data) {
++    struct wlr_addon *addon = wlr_addon_find(&output->addons, manager, &output_description_impl);
++    struct output_description *desc;
++    if (addon) desc = wl_container_of(addon, desc, addon);
++    else {
++        desc = calloc(1, sizeof(*desc));
++        if (!desc) return;
++        wlr_addon_init(&desc->addon, &output->addons, manager, &output_description_impl);
++    }
++    if (wlr_image_description_v1_data_equal(&desc->data, data)) return;
++    desc->data = *data;
++    struct wlr_color_management_output_v1 *cm_output;
++    wl_list_for_each(cm_output, &manager->outputs, link)
++        if (cm_output->output == output)
++            wp_color_management_output_v1_send_image_description_changed(cm_output->resource);
++}
++
++static bool luminances_equal(const struct wlr_color_luminances *a, const struct wlr_color_luminances *b) {
++    return a->min == b->min && a->max == b->max && a->reference == b->reference;
++}
++bool wlr_image_description_v1_data_equal(const struct wlr_image_description_v1_data *a,
++        const struct wlr_image_description_v1_data *b) {
++    if (a->tf_named != b->tf_named || a->primaries_named != b->primaries_named ||
++        a->has_mastering_display_primaries != b->has_mastering_display_primaries ||
++        a->has_mastering_luminance != b->has_mastering_luminance ||
++        a->has_luminances != b->has_luminances || a->has_target_luminance != b->has_target_luminance ||
++        a->max_cll != b->max_cll || a->max_fall != b->max_fall) return false;
++    if (a->has_mastering_display_primaries) {
++        const struct wlr_color_primaries *x = &a->mastering_display_primaries, *y = &b->mastering_display_primaries;
++        if (x->red.x != y->red.x || x->red.y != y->red.y || x->green.x != y->green.x || x->green.y != y->green.y ||
++            x->blue.x != y->blue.x || x->blue.y != y->blue.y || x->white.x != y->white.x || x->white.y != y->white.y) return false;
++    }
++    if (a->has_mastering_luminance && (a->mastering_luminance.min != b->mastering_luminance.min ||
++        a->mastering_luminance.max != b->mastering_luminance.max)) return false;
++    return (!a->has_luminances || luminances_equal(&a->luminances, &b->luminances)) &&
++           (!a->has_target_luminance || luminances_equal(&a->target_luminance, &b->target_luminance));
++}

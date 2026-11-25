@@ -217,6 +217,7 @@ main (int   argc,
 #endif
 
   g_setenv ("PULSE_PROP_application.icon_name", APPLICATION_ID, TRUE);
+  g_setenv ("GNOSIS_COLOR_MANAGEMENT", "1", TRUE);
 
   /* Initialize the i18n stuff */
   bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
