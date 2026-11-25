@@ -24,7 +24,9 @@ static void update_monitor_output(GnosisCompositor *server, MonitorOutput *monit
     if (!wlr_output_commit_state(output, &state)) g_warning("Could not mirror GTK monitor mode");
     wlr_output_state_finish(&state);
   }
-  wlr_output_layout_add(server->output_layout, output, geometry.x, geometry.y);
+  struct wlr_output_layout_output *position = wlr_output_layout_get(server->output_layout, output);
+  if (!position || position->x != geometry.x || position->y != geometry.y)
+    wlr_output_layout_add(server->output_layout, output, geometry.x, geometry.y);
 }
 static MonitorOutput *monitor_output(GnosisCompositor *server, GdkMonitor *gdk_monitor) {
   if (!gdk_monitor) return NULL;
