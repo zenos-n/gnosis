@@ -64,7 +64,7 @@ static void fail(const char *message) {g_printerr("HDR_GTK_FAIL stage=%d %s\n",s
  * outer compositor. This exercises real nested protocol/Chromium negotiation. */
 extern "C" GdkColorState *gnosis_gdk_wayland_surface_get_preferred(GdkSurface *surface, guint32 values[5]) {
   if (fixture >= 0) {
-    guint32 sample[] = {0, fixture ? 10000u : 80u, fixture ? 203u : 80u, 0, fixture ? 1000u : 80u};
+    guint32 sample[] = {0, fixture ? 10000u : 80u, fixture ? 267u : 80u, 0, fixture ? 1000u : 80u};
     memcpy(values,sample,sizeof(sample));
     return fixture ? gdk_color_state_get_rec2100_pq() : gdk_color_state_get_srgb();
   }
@@ -86,11 +86,11 @@ static GdkTexture *hdr_texture(GskRenderNode *node, bool any=false) {
   switch(gsk_render_node_get_node_type(node)) {
     case GSK_TEXTURE_NODE: {
       auto *texture=gsk_texture_node_get_texture(node);
-      return (any || gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_rec2100_pq()))?GDK_TEXTURE(g_object_ref(texture)):nullptr;
+      return ((any && gdk_texture_get_width(texture)>256 && gdk_texture_get_height(texture)>256) || (!any && gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_rec2100_pq())))?GDK_TEXTURE(g_object_ref(texture)):nullptr;
     }
     case GSK_TEXTURE_SCALE_NODE: {
       auto *texture=gsk_texture_scale_node_get_texture(node);
-      return (any || gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_rec2100_pq()))?GDK_TEXTURE(g_object_ref(texture)):nullptr;
+      return ((any && gdk_texture_get_width(texture)>256 && gdk_texture_get_height(texture)>256) || (!any && gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_rec2100_pq())))?GDK_TEXTURE(g_object_ref(texture)):nullptr;
     }
     case GSK_CONTAINER_NODE:
       for(guint i=0;i<gsk_container_node_get_n_children(node);i++)if(auto *texture=hdr_texture(gsk_container_node_get_child(node,i),any))return texture;
@@ -104,8 +104,8 @@ static GdkTexture *hdr_texture(GskRenderNode *node, bool any=false) {
   }
 }
 static bool check_sdr_ramp() {
-  auto *paintable=gtk_widget_paintable_new(host);auto *snapshot=gtk_snapshot_new();
-  gdk_paintable_snapshot(paintable,GDK_SNAPSHOT(snapshot),gtk_widget_get_width(host),gtk_widget_get_height(host));
+  auto *paintable=gtk_widget_paintable_new(GTK_WIDGET(window));auto *snapshot=gtk_snapshot_new();
+  gdk_paintable_snapshot(paintable,GDK_SNAPSHOT(snapshot),gtk_widget_get_width(GTK_WIDGET(window)),gtk_widget_get_height(GTK_WIDGET(window)));
   auto *node=gtk_snapshot_free_to_node(snapshot);g_object_unref(paintable);
   if(!node)return false;
   auto *texture=hdr_texture(node,true);gsk_render_node_unref(node);if(!texture)return false;
@@ -118,7 +118,13 @@ static bool check_sdr_ramp() {
   gdk_texture_downloader_free(download);g_object_unref(texture);
   size_t counts[5]={};
   for(size_t i=0;i<pixels.size();i+=4)if(pixels[i+3]==255 && abs(int(pixels[i])-pixels[i+1])<=2 && abs(int(pixels[i])-pixels[i+2])<=2)
-    for(int j=0;j<5;++j)if(abs(int(pixels[i])-(j==4?255:64*j))<=3)++counts[j];
+    for(int j=0;j<5;++j) {
+      double encoded=(j==4?255:64*j)/255.;
+      double linear=encoded<=.04045?encoded/12.92:std::pow((encoded+.055)/1.055,2.4);
+      if(fixture==1)linear*=267./203.;
+      double expected=linear<=.0031308?linear*12.92:1.055*std::pow(linear,1/2.4)-.055;
+      if(abs(int(pixels[i])-int(std::lround(std::min(1.,expected)*255)))<=3)++counts[j];
+    }
   g_print("HDR_SDR_RAMP fixture=%d counts=%zu,%zu,%zu,%zu,%zu\n",fixture,counts[0],counts[1],counts[2],counts[3],counts[4]);
   for(auto count:counts)if(count<100)return false;
   return true;
@@ -162,13 +168,13 @@ static gboolean tick(gpointer) {
     real(outer,lum);if(!lum[1] || !lum[2])fail("outer display luminance metadata was discarded");g_print("HDR_METADATA_PERSISTENCE %u %u %u %u %u\n",lum[0],lum[1],lum[2],lum[3],lum[4]);
     fixture=0;gtk_widget_queue_draw(host);stage=1;changed=now;
   } else if(stage==1) {
-    evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,hz:1000/(frameDeltas.slice(-60).sort((a,b)=>a-b)[30]||0)})",[](JsonObject *v){auto *json=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_SDR_PACING %s\n",json);if(g_getenv("GNOSIS_HDR_REAL_FEEDBACK")){const char *rate=strstr(json,"\"hz\":");if(!rate||g_ascii_strtod(rate+5,nullptr)<90)fail("native120Hz display fell below90fps");}if(strstr(json,"\"hdr\":true"))fail("SDR output falsely advertised HDR");if(!check_sdr_ramp())fail("SDR grayscale changed");g_print("HDR_GTK_SDR_PASS\n");fixture=1;gtk_widget_queue_draw(host);stage=2;changed=g_get_monotonic_time();});
+    evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,hz:1000/(frameDeltas.slice(-60).sort((a,b)=>a-b)[30]||0)})",[](JsonObject *v){auto *json=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_SDR_PACING %s\n",json);if(g_getenv("GNOSIS_HDR_REAL_FEEDBACK")){const char *rate=strstr(json,"\"hz\":");if(!rate||g_ascii_strtod(rate+5,nullptr)<90)fail("native120Hz display fell below90fps");}if(strstr(json,"\"hdr\":true"))fail("SDR output falsely advertised HDR");if(!check_sdr_ramp()){if(g_get_monotonic_time()-changed>5*G_USEC_PER_SEC)fail("SDR grayscale changed");return;}g_print("HDR_GTK_SDR_PASS\n");fixture=1;gtk_widget_queue_draw(host);stage=2;changed=g_get_monotonic_time();});
   } else if(stage==2) {
     evaluate("JSON.stringify({hdr:matchMedia('(dynamic-range: high)').matches,p3:matchMedia('(color-gamut: p3)').matches,rec2020:matchMedia('(color-gamut: rec2020)').matches,webgpu:!!navigator.gpu,canvas:(()=>{const c=document.createElement('canvas').getContext('2d',{colorType:'float16',colorSpace:'display-p3',toneMapping:{mode:'extended'}});const a=c.getContextAttributes();return a.colorType==='float16'&&a.toneMapping?.mode==='extended'})()})",[](JsonObject *v){
       auto *value=json_object_get_string_member_with_default(v,"value","");g_print("HDR_GTK_WEB_CAPABILITIES %s\n",value);
       if(!strstr(value,"\"hdr\":true"))return;
       if(!strstr(value,"\"canvas\":true"))fail("HDR canvas API unavailable");
-      if(!check_sdr_ramp())fail("HDR output altered SDR grayscale");g_print("HDR_GTK_CAPABILITY_PASS display metadata reaches Chromium\n");
+      if(!check_sdr_ramp()){if(g_get_monotonic_time()-changed>5*G_USEC_PER_SEC)fail("HDR output altered SDR grayscale");return;}g_print("HDR_GTK_CAPABILITY_PASS display metadata reaches Chromium\n");
       evaluate("document.body.innerHTML='<img src=\"/hdr.png\" width=400 height=400>'",[](JsonObject *){stage=3;changed=g_get_monotonic_time();});
     });
   } else if(stage==3) {

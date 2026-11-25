@@ -342,3 +342,13 @@ original 64x48 clipboard pixels for a directly opened WebP with a `.jpeg`
 filename, a scaled cross-origin WebP without CORS headers, and an SVG. Copy must
 become available within 400 ms. The package merges the base/SVG Pixbuf cache
 with the WebP loader cache; merely adding the dependency does not register it.
+
+The HDR regression additionally reads real completed GTK display metadata before
+fixture injection, compares a five-step SDR ramp on SDR and a 267-nit HDR output,
+and uses a 1920x1080 video with the DOM fullscreen API. Build
+`native-offload-crop-test.c` against the packaged patched GTK with `-Iengine/brave`
+and pass it through `--crop-probe` (its GTK library must match the package).
+It reproduces a 455-logical-pixel crop of a 1920-pixel texture: floating-point
+rounding previously exceeded the right edge and triggered the same fatal
+`gdk_subsurface_attach` assertion as fullscreen YouTube. Both checks fail on the
+old GTK build. All displays, profiles and clipboard state remain isolated.

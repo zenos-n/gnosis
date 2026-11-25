@@ -20,6 +20,7 @@ p.add_argument('--mutter', required=True, type=Path)
 p.add_argument('--log', type=Path, default=Path('/tmp/gnosis-hdr.log'))
 p.add_argument('--scale', type=float, default=1, choices=(1, 5/3), help='Private virtual display scale')
 p.add_argument('--real-feedback', action='store_true', help='Check native120Hz cadence without synthetic refresh injection')
+p.add_argument('--crop-probe', type=Path, help='Optional native GTK fractional crop regression executable')
 p.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
 a = p.parse_args()
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -80,7 +81,7 @@ source = fixture_dir / 'source.png'
 source.write_bytes(png(struct.pack('!HHH',pq(1000),pq(203),0)*64))
 video_path = fixture_dir / 'hdr.webm'
 subprocess.run([str(a.ffmpeg),'-v','error','-threads','1','-filter_threads','1','-loop','1','-i',str(source),'-t','2','-r','15',
-                '-vf','scale=out_color_matrix=bt2020:out_range=tv','-c:v','libvpx-vp9','-profile:v','2',
+                '-vf','scale=1920:1080:out_color_matrix=bt2020:out_range=tv','-c:v','libvpx-vp9','-profile:v','2',
                 '-pix_fmt','yuv420p10le','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc',
                 '-deadline','realtime','-cpu-used','8','-threads','1','-y',str(video_path)],check=True,timeout=20)
 video=video_path.read_bytes()
@@ -109,6 +110,8 @@ try:
         time.sleep(.1)
     else:
         raise AssertionError('Private Wayland display unavailable')
+    if a.crop_probe:
+        subprocess.run([str(a.crop_probe.resolve())], env=dict(os.environ, GDK_DEBUG='offload,force-offload', G_DEBUG='fatal-criticals'), check=True, timeout=10)
     env = dict(os.environ, LD_PRELOAD=str(a.probe.resolve()), GNOSIS_HDR_TEST='1', GNOSIS_HDR_TEST_SCALE=str(a.scale))
     if a.real_feedback: env['GNOSIS_HDR_REAL_FEEDBACK'] = '1'
     subprocess.run([str(a.gnosis.resolve()), '--incognito-mode',
