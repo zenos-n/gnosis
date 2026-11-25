@@ -352,3 +352,8 @@ It reproduces a 455-logical-pixel crop of a 1920-pixel texture: floating-point
 rounding previously exceeded the right edge and triggered the same fatal
 `gdk_subsurface_attach` assertion as fullscreen YouTube. Both checks fail on the
 old GTK build. All displays, profiles and clipboard state remain isolated.
+
+The video regression repeats DOM fullscreen entry and exit three times, waiting
+for restored window geometry and retained HDR pixels after each exit. SDR ramp
+checks snapshot the current compositor-view surfaces directly; a widget
+paintable may still contain an empty or stale render node during color changes.
