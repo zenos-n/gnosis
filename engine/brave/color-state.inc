@@ -14,8 +14,11 @@ static GdkColorState *surface_color(struct wlr_surface *surface) {
       description->tf_named == WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ)
     return gdk_color_state_ref(gdk_color_state_get_rec2100_pq());
   g_autoptr(GdkCicpParams) params = gdk_cicp_params_new();
-  gdk_cicp_params_set_color_primaries(params, description->primaries_named == WP_COLOR_MANAGER_V1_PRIMARIES_BT2020 ? 9 : 1);
+  guint primaries = description->primaries_named == WP_COLOR_MANAGER_V1_PRIMARIES_BT2020 ? 9 :
+    description->primaries_named == WP_COLOR_MANAGER_V1_PRIMARIES_DISPLAY_P3 ? 12 : 1;
+  gdk_cicp_params_set_color_primaries(params, primaries);
   gdk_cicp_params_set_transfer_function(params, description->tf_named == WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ ? 16 : 13);
+  gdk_cicp_params_set_matrix_coefficients(params, 0); /* RGB, not unspecified/YUV */
   gdk_cicp_params_set_range(params, GDK_CICP_RANGE_FULL);
   GdkColorState *color = gdk_cicp_params_build_color_state(params, NULL);
   return color ? color : gdk_color_state_ref(gdk_color_state_get_srgb());

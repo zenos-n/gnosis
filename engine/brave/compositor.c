@@ -1176,7 +1176,8 @@ GnosisCompositor *gnosis_compositor_new(GError **error) {
   static const enum wp_color_manager_v1_transfer_function transfers[] = {
     WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ};
   static const enum wp_color_manager_v1_primaries primaries[] = {
-    WP_COLOR_MANAGER_V1_PRIMARIES_SRGB, WP_COLOR_MANAGER_V1_PRIMARIES_BT2020};
+    WP_COLOR_MANAGER_V1_PRIMARIES_SRGB, WP_COLOR_MANAGER_V1_PRIMARIES_DISPLAY_P3,
+    WP_COLOR_MANAGER_V1_PRIMARIES_BT2020};
   const struct wlr_color_manager_v1_options color_options = {
     .features = {.parametric = TRUE, .set_mastering_display_primaries = TRUE},
     .render_intents = intents, .render_intents_len = G_N_ELEMENTS(intents),

@@ -150,5 +150,13 @@
   "external_checkbox_visible_bytes": "554889e5488bbf900300004885ff74065de9ea7a",
   "external_checkbox_text_rva": "0xe243180",
   "external_checkbox_text_bytes": "554889e5488b87c8040000488b8858030000480f",
-  "external_vtable_rva": "0x12ff4df8"
+  "external_vtable_rva": "0x12ff4df8",
+  "content_color_spaces_rva": "0x08065980",
+  "content_color_spaces_bytes": "554889e5415741564154534881ecf0010000",
+  "content_color_request_rva": "0x08061380",
+  "content_color_request_bytes": "554889e54157415641554154534883ec18",
+  "content_color_ready_rva": "0x08061480",
+  "content_color_ready_bytes": "554889e541574156534881ec38010000",
+  "content_color_commit_rva": "0x0804b180",
+  "content_color_commit_bytes": "554889e54157415641554154534881ec48010000"
 }

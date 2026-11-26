@@ -120,13 +120,15 @@ static GdkTexture *hdr_texture(GskRenderNode *node, bool any=false) {
   for(gsize i=0;i<count;++i)if(auto *child=hdr_texture(children[i],any))return child;
   return nullptr;
 }
-static bool check_sdr_ramp() {
+static bool check_sdr_ramp(bool require_srgb=true) {
   auto *snapshot=gtk_snapshot_new();
   /* Read the current nested surfaces, not a paintable cached across color changes. */
   GTK_WIDGET_GET_CLASS(host)->snapshot(host,snapshot);
   auto *node=gtk_snapshot_free_to_node(snapshot);
   if(!node)return false;
   auto *texture=hdr_texture(node,true);gsk_render_node_unref(node);if(!texture)return false;
+  bool srgb=gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_srgb());
+  if(require_srgb && !srgb){g_print("HDR_SDR_SURFACE expected=sRGB actual=other fixture=%d\n",fixture);g_object_unref(texture);return false;}
   int width=gdk_texture_get_width(texture),height=gdk_texture_get_height(texture);
   std::vector<guchar> pixels(size_t(width)*height*4);
   auto *download=gdk_texture_downloader_new(texture);
@@ -145,6 +147,27 @@ static bool check_sdr_ramp() {
   g_print("HDR_SDR_RAMP fixture=%d counts=%zu,%zu,%zu,%zu,%zu\n",fixture,counts[0],counts[1],counts[2],counts[3],counts[4]);
   for(auto count:counts)if(count<size_t(width)*height/100)return false;
   return true;
+}
+static bool check_p3_pixels() {
+  auto *snapshot=gtk_snapshot_new();GTK_WIDGET_GET_CLASS(host)->snapshot(host,snapshot);
+  auto *node=gtk_snapshot_free_to_node(snapshot);if(!node)return false;
+  auto *texture=hdr_texture(node,true);gsk_render_node_unref(node);if(!texture)return false;
+  auto *params=gdk_cicp_params_new();gdk_cicp_params_set_color_primaries(params,12);
+  gdk_cicp_params_set_transfer_function(params,13);gdk_cicp_params_set_matrix_coefficients(params,0);
+  gdk_cicp_params_set_range(params,GDK_CICP_RANGE_FULL);
+  auto *p3=gdk_cicp_params_build_color_state(params,nullptr);g_object_unref(params);
+  if(!p3)fail("GTK cannot construct the Display P3 reference state");
+  if(!gdk_color_state_equivalent(gdk_texture_get_color_state(texture),p3)) {
+    gdk_color_state_unref(p3);g_object_unref(texture);return false;
+  }
+  int width=gdk_texture_get_width(texture),height=gdk_texture_get_height(texture);
+  std::vector<guchar> pixels(size_t(width)*height*4);
+  auto *download=gdk_texture_downloader_new(texture);gdk_texture_downloader_set_color_state(download,p3);
+  gdk_texture_downloader_set_format(download,GDK_MEMORY_R8G8B8A8);
+  gdk_texture_downloader_download_into(download,pixels.data(),width*4);
+  gdk_texture_downloader_free(download);gdk_color_state_unref(p3);g_object_unref(texture);
+  size_t red=0;for(size_t i=0;i<pixels.size();i+=4)if(pixels[i]>250&&pixels[i+1]<3&&pixels[i+2]<3&&pixels[i+3]==255)++red;
+  g_print("SDR_P3_PIXELS %zu\n",red);return red>10000;
 }
 static bool check_hdr_pixels(bool video = false) {
   auto *paintable=gtk_widget_paintable_new(GTK_WIDGET(window));auto *snapshot=gtk_snapshot_new();
@@ -193,7 +216,7 @@ static gboolean tick(gpointer) {
       if(!strstr(value,"\"canvas\":true"))fail("HDR canvas API unavailable");
       if(!check_sdr_ramp()){if(g_get_monotonic_time()-changed>5*G_USEC_PER_SEC)fail("HDR output altered SDR grayscale");return;}g_print("HDR_GTK_CAPABILITY_PASS display metadata reaches Chromium\n");
       if(!window_states_done){gtk_window_maximize(window);stage=20;changed=g_get_monotonic_time();return;}
-      evaluate("document.body.innerHTML='<img src=\"/hdr.png\" width=400 height=400>'",[](JsonObject *){stage=3;changed=g_get_monotonic_time();});
+      evaluate("document.body.innerHTML='<canvas width=400 height=400></canvas>';const c=document.querySelector('canvas').getContext('2d',{colorSpace:'display-p3'});c.fillStyle='color(display-p3 1 0 0)';c.fillRect(0,0,400,400)",[](JsonObject *){stage=27;changed=g_get_monotonic_time();});
     });
   } else if(stage>=20 && stage<=25) {
     bool ready=stage==20?gtk_window_is_maximized(window):
@@ -210,13 +233,19 @@ static gboolean tick(gpointer) {
       gtk_window_maximize(window);stage=20;changed=now;return G_SOURCE_CONTINUE;
     } else f11();
     ++stage;changed=now;
+  } else if(stage==27) {
+    if(!check_p3_pixels()){if(now-changed>5*G_USEC_PER_SEC)fail("Display P3 SDR was clipped or mislabeled");return G_SOURCE_CONTINUE;}
+    g_print("SDR_P3_PASS native P3 surface retains out-of-sRGB red\n");
+    evaluate("document.body.innerHTML='<img src=\"/hdr.png\" width=400 height=400>'",[](JsonObject *){stage=3;changed=g_get_monotonic_time();});
   } else if(stage==3) {
     if(!check_hdr_pixels()){changed=now;return G_SOURCE_CONTINUE;}
+    if(!check_sdr_ramp(false))fail("HDR image changed SDR document grays");
     g_print("HDR_GTK_WINDOWED_PASS actual HDR texture retains highlights\n");
     evaluate("document.body.innerHTML='<video src=\"/hdr.webm\" width=400 height=400 autoplay muted loop></video>';document.querySelector('video').muted=true;document.querySelector('video').play()",[](JsonObject *){stage=7;changed=g_get_monotonic_time();});
   } else if(stage==7) {
     evaluate("document.querySelector('video').currentTime>0.5 && document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames>3",[](JsonObject *v){
       if(!json_object_get_boolean_member_with_default(v,"value",false)||!check_hdr_pixels(true))return;
+      if(!check_sdr_ramp(false))fail("HDR video changed SDR document grays");
       g_print("HDR_GTK_VIDEO_PASS VP9 10-bit PQ retains red highlight and SDR green\n");evaluate("document.querySelector('video').requestFullscreen()",[](JsonObject *){stage=6;changed=g_get_monotonic_time();});
     });
   } else if(stage==6) {

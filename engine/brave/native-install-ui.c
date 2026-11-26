@@ -963,6 +963,7 @@ static void download_begin(void *handler, void *frame, void *item) {
 #include "native-external-ui.inc"
 
 #include "native-close.inc"
+#include "native-content-color.inc"
 
 __attribute__((constructor)) static void initialize(void) {
   /* Only the browser ELF is preloaded by our private runtime launcher. */
@@ -1034,6 +1035,7 @@ __attribute__((constructor)) static void initialize(void) {
     const struct DebugOptionalPatch *patch=&debug_optional_patches[i];
     if (!gnosis_adapter_enabled(patch->id) && !replace_code(patch->offset,patch->original,patch->length)) _exit(126);
   }
+  if (!install_content_color()) _exit(126);
   unsigned char *trampoline = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (trampoline == MAP_FAILED) { close(channel); channel = -1; return; }

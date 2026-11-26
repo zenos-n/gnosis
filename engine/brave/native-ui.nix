@@ -35,6 +35,8 @@ let
       $CC -Wall -Wextra ${../tests/brave-portal-parent-test.c} -I${./.} \
         $(pkg-config --cflags --libs glib-2.0 dbus-1) -ldl -o portal-parent-test
       ./portal-parent-test
+      $CC -Wall -Wextra ${../tests/brave-content-color-test.c} -I${./.} -o content-color-test
+      ./content-color-test
     '';
     buildPhase = ''
       cat ${config} > gnosis-native-install-config.h
@@ -44,6 +46,8 @@ let
       cp ${./native-find.inc} native-find.inc
       cp ${./native-external-ui.inc} native-external-ui.inc
       cp ${./native-close.inc} native-close.inc
+      cp ${./native-content-color.inc} native-content-color.inc
+      cp ${./content-color-layout.h} content-color-layout.h
       $CC -shared -fPIC -O2 -Wall -Wextra ${./native-install-ui.c} ${./native-notifications.c} -I. \
         $(pkg-config --cflags --libs glib-2.0 json-glib-1.0 dbus-1) -ldl -o native-install-ui.so
     '';

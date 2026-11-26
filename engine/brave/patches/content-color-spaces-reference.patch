@@ -1,0 +1,63 @@
+From: Gnosis contributors
+Subject: [REFERENCE] Separate SDR/HDR output and commit asynchronous descriptions
+
+Chromium 155.0.8059.40, BSD-3-Clause upstream. Packaged as the exact-binary
+native-content-color.inc adapter, without rebuilding Chromium.
+
+--- a/ui/ozone/platform/wayland/host/wayland_wp_image_description.cc
++++ b/ui/ozone/platform/wayland/host/wayland_wp_image_description.cc
+@@ -156,6 +156,17 @@
+     display_color_spaces.SetOutputFormats(*hdr_output_format,
+                                           *hdr_output_format);
+   }
++  for (int i = 0; i < 2; ++i) {
++    const bool alpha = i;
++    const auto srgb = gfx::ContentColorUsage::kSRGB;
++    const auto wcg = gfx::ContentColorUsage::kWideColorGamut;
++    display_color_spaces.SetOutputColorSpaceAndFormat(
++        srgb, alpha, gfx::ColorSpace::CreateSRGB(),
++        display_color_spaces.GetOutputFormat(srgb, alpha));
++    display_color_spaces.SetOutputColorSpaceAndFormat(
++        wcg, alpha, gfx::ColorSpace::CreateDisplayP3D65(),
++        display_color_spaces.GetOutputFormat(wcg, alpha));
++  }
+   return base::MakeRefCounted<gfx::DisplayColorSpacesRef>(
+       std::move(display_color_spaces));
+ }
+--- a/ui/ozone/platform/wayland/host/wayland_wp_color_management_surface.cc
++++ b/ui/ozone/platform/wayland/host/wayland_wp_color_management_surface.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "ui/ozone/platform/wayland/host/wayland_wp_color_management_surface.h"
+ 
++#include "base/auto_reset.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/memory/scoped_refptr.h"
+@@ -18,6 +19,9 @@
+ #include "ui/ozone/platform/wayland/host/wayland_wp_color_manager.h"
+ 
+ namespace ui {
++namespace {
++thread_local unsigned color_request_depth = 0;
++}  // namespace
+ 
+ WaylandWpColorManagementSurface::WaylandWpColorManagementSurface(
+     WaylandSurface* wayland_surface,
+@@ -60,6 +64,7 @@
+   auto* color_manager = connection_->wp_color_manager();
+   DCHECK(color_manager);
+ 
++  base::AutoReset<unsigned> request(&color_request_depth, color_request_depth + 1);
+   color_manager->GetImageDescription(
+       color_space, hdr_metadata,
+       base::BindOnce(&WaylandWpColorManagementSurface::OnSetColorSpace,
+@@ -81,6 +86,8 @@
+   render_intent = WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL;
+   wp_color_management_surface_v1_set_image_description(
+       management_surface_.get(), image_description->object(), render_intent);
++  if (!color_request_depth)
++    wayland_surface_->Commit(/*flush=*/true);
+ }
+ 
+ void WaylandWpColorManagementSurface::OnImageDescription(

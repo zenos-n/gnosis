@@ -365,3 +365,12 @@ five SDR gray bands. Nested PQ uses GTK's 203-nit reference; a simulated
 267-nit physical white level changes target headroom/light values proportionally,
 not the page's encoded SDR grays. This keeps native PQ planes and GTK's sRGB
 fallback consistent when GNOME applies the display's white-level adjustment.
+
+
+Content-color checks now additionally require that an SDR-only document stays
+an sRGB native surface even while the output advertises HDR. A real Display-P3
+2D canvas must produce a P3-tagged SDR surface with out-of-sRGB red pixels.
+The static HDR image must negotiate its new description without any later DOM
+change, and both the image and video must preserve the surrounding five SDR
+gray bands. The old all-PQ mapping fails the SDR-surface requirement; a mapping
+change without committing asynchronous descriptions fails the static image.

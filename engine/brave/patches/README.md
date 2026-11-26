@@ -392,3 +392,55 @@ Reference: Chromium 155.0.8059.40
 [external_protocol_dialog.cc](https://github.com/chromium/chromium/blob/155.0.8059.40/chrome/browser/ui/views/external_protocol_dialog.cc).
 The adapter is original GPL code; the upstream BSD implementation remains in
 the browser and is called in place.
+
+
+### Content-aware output color spaces
+
+`native-content-color.inc` wraps Chromium 155.0.8059.40's
+`WaylandWpImageDescription::AsDisplayColorSpaces` (`0x8065980`). The original
+Wayland implementation copies the preferred physical output space into all six
+content usage slots. Gnosis keeps sRGB SDR in sRGB and wide-gamut SDR in Display
+P3, while retaining both original HDR slots, buffer formats, physical primaries,
+reference white and headroom. The browser still advertises real HDR capability;
+there is no URL/media-query spoofing, page scan, forced sRGB profile or monitor
+mode switch. A mixed SDR/HDR frame may legitimately use one PQ surface: its SDR
+pixels retain SDR luminance and its HDR pixels retain their highlights.
+
+The native wlroots bridge advertises Display P3 and maps it to CICP primaries12
+with the sRGB transfer function. Previously the fallback mislabeled P3 as BT.709.
+This preserves explicit wide-gamut canvas colors instead of clipping them to
+sRGB or misinterpreting their primaries.
+
+Changing output space exposes an asynchronous upstream commit issue:
+`WaylandWpColorManagementSurface::OnSetColorSpace` sets a pending Wayland image
+description after a newly created description becomes ready, but does not
+commit it. A static image can remain incorrectly tagged until another repaint;
+video happens to supply another commit. The adapter commits the surface after
+that asynchronous callback. Cached descriptions set synchronously inside
+`SetColorSpace` retain the caller's ordinary atomic buffer/color commit; a
+thread-local request-depth guard avoids an extra commit on every video frame.
+No frame buffers, callbacks or image-description objects are retained by Gnosis.
+
+The exact ELF digest, complete relocation-free prologues and native Commit entry
+are pinned in `native-install-ui.json`. The supported refcounted object has a
+4-byte refcount followed by six68-byte ColorSpaces; its500-byte allocation and
+member offsets were checked against this release's matching official Breakpad
+symbols and disassembly. Unknown binaries fail the existing version/hash gate.
+The adapter runs only in the private browser process; sandboxed renderer/GPU
+processes retain upstream code. No Chromium rebuild is required.
+
+Reference source (Chromium BSD license):
+- https://github.com/chromium/chromium/blob/155.0.8059.40/ui/ozone/platform/wayland/host/wayland_wp_image_description.cc
+- https://github.com/chromium/chromium/blob/155.0.8059.40/ui/ozone/platform/wayland/host/wayland_wp_color_management_surface.cc
+- https://github.com/chromium/chromium/blob/155.0.8059.40/ui/ozone/platform/wayland/host/wayland_surface.cc
+- https://github.com/chromium/chromium/blob/155.0.8059.40/ui/gfx/display_color_spaces.cc
+
+`content-color-spaces-reference.patch` records the equivalent source change;
+it is a review/upgrade reference, not an additional applied source series.
+The package's native unit check verifies that HDR slots and display metadata
+survive unchanged. The private native HDR fixture requires an actual sRGB SDR
+surface on an HDR-capable output, correct P3 red pixels, static PQ image/video
+highlights, unchanged surrounding SDR gray bands, repeated fullscreen transitions
+and fractional scaling. These checks establish encoded colors and protocol
+behavior, not physical monitor calibration or identical appearance under
+compositor-specific subjective SDR enhancement profiles.
