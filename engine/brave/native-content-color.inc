@@ -25,7 +25,14 @@ static void content_color_ready(void *self, void *description) {
    * description arrives later and otherwise waits for another content frame. */
   if (valid && !color_request_depth) {
     void *surface = *(void **)((unsigned char *)self + 0x18);
-    ((void (*)(void *, unsigned))(image + UI_CONTENT_COLOR_COMMIT_RVA))(surface, 1);
+    void *proxy = *(void **)((unsigned char *)surface + 0x348);
+    unsigned version = ((unsigned (*)(void *))(image + UI_CONTENT_COLOR_PROXY_VERSION_RVA))(proxy);
+    /* Only commit pending protocol state. WaylandSurface::Commit also runs
+     * explicit buffer-release handling owned by the normal frame submission. */
+    ((void *(*)(void *, unsigned, const void *, unsigned, unsigned, ...))
+      (image + UI_CONTENT_COLOR_PROXY_MARSHAL_RVA))(proxy, 6, NULL, version, 0);
+    ((void (*)(void *))(image + UI_CONTENT_COLOR_FLUSH_RVA))
+      (*(void **)((unsigned char *)self + 0x20));
   }
 }
 static void *content_color_hook(uintptr_t offset, const char *prefix, size_t length, void *replacement) {
@@ -42,7 +49,9 @@ static void *content_color_hook(uintptr_t offset, const char *prefix, size_t len
   return code;
 }
 static gboolean install_content_color(void) {
-  if (!matches(UI_CONTENT_COLOR_COMMIT_RVA, UI_CONTENT_COLOR_COMMIT_BYTES)) return FALSE;
+  if (!matches(UI_CONTENT_COLOR_PROXY_VERSION_RVA, UI_CONTENT_COLOR_PROXY_VERSION_BYTES) ||
+      !matches(UI_CONTENT_COLOR_PROXY_MARSHAL_RVA, UI_CONTENT_COLOR_PROXY_MARSHAL_BYTES) ||
+      !matches(UI_CONTENT_COLOR_FLUSH_RVA, UI_CONTENT_COLOR_FLUSH_BYTES)) return FALSE;
   original_content_color_spaces = content_color_hook(UI_CONTENT_COLOR_SPACES_RVA,
     UI_CONTENT_COLOR_SPACES_BYTES, 18, content_color_spaces);
   original_color_request = content_color_hook(UI_CONTENT_COLOR_REQUEST_RVA,

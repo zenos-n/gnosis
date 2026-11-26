@@ -419,9 +419,13 @@ video happens to supply another commit. The adapter commits the surface after
 that asynchronous callback. Cached descriptions set synchronously inside
 `SetColorSpace` retain the caller's ordinary atomic buffer/color commit; a
 thread-local request-depth guard avoids an extra commit on every video frame.
-No frame buffers, callbacks or image-description objects are retained by Gnosis.
+The callback sends only `wl_surface.commit` and flushes the connection. It does
+not call `WaylandSurface::Commit`, which also handles explicit buffer releases
+and caused a fractional120Hz fullscreen/restore sizing regression when reused
+outside normal frame submission. No frame buffers, callbacks or image-description
+objects are retained by Gnosis.
 
-The exact ELF digest, complete relocation-free prologues and native Commit entry
+The exact ELF digest, complete relocation-free prologues and native Wayland marshal/version/flush entries
 are pinned in `native-install-ui.json`. The supported refcounted object has a
 4-byte refcount followed by six68-byte ColorSpaces; its500-byte allocation and
 member offsets were checked against this release's matching official Breakpad

@@ -157,6 +157,10 @@
   "content_color_request_bytes": "554889e54157415641554154534883ec18",
   "content_color_ready_rva": "0x08061480",
   "content_color_ready_bytes": "554889e541574156534881ec38010000",
-  "content_color_commit_rva": "0x0804b180",
-  "content_color_commit_bytes": "554889e54157415641554154534881ec48010000"
+  "content_color_proxy_version_rva": "0x07dd7b70",
+  "content_color_proxy_version_bytes": "554889e58b47405dc3",
+  "content_color_proxy_marshal_rva": "0x07dd6860",
+  "content_color_proxy_marshal_bytes": "554889e54157415641554154534881ec78010000",
+  "content_color_flush_rva": "0x08020620",
+  "content_color_flush_bytes": "554889e5488b7f205de99273dbff"
 }

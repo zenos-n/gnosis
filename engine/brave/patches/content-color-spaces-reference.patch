@@ -52,12 +52,14 @@ native-content-color.inc adapter, without rebuilding Chromium.
    color_manager->GetImageDescription(
        color_space, hdr_metadata,
        base::BindOnce(&WaylandWpColorManagementSurface::OnSetColorSpace,
-@@ -81,6 +86,8 @@
+@@ -81,6 +86,10 @@
    render_intent = WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL;
    wp_color_management_surface_v1_set_image_description(
        management_surface_.get(), image_description->object(), render_intent);
 +  if (!color_request_depth)
-+    wayland_surface_->Commit(/*flush=*/true);
++    wl_surface_commit(wayland_surface_->surface());
++  if (!color_request_depth)
++    connection_->Flush();
  }
  
  void WaylandWpColorManagementSurface::OnImageDescription(
