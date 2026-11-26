@@ -280,8 +280,6 @@ public:
   std::map<std::string, DownloadProgress> downloads;
   std::set<std::string> download_guids;
   std::string download_directory;
-  struct ParkedPage { std::string target, session; ::Window child; GtkWidget* surface = nullptr; };
-  std::vector<ParkedPage> parked;
 #include "web-app-extensions.inc"
 #include "keepassxc-pairing.inc"
   explicit Process(bool ephemeral, const std::string& reuse_profile = "") : private_profile(ephemeral) {
@@ -340,8 +338,6 @@ public:
     stop_keepassxc_pairing();
     if (keepassxc_poll) g_source_remove(keepassxc_poll);
     stop();
-    for (auto& page : parked) if (page.surface) g_object_unref(page.surface);
-    parked.clear();
     g_clear_object(&server); g_clear_object(&compositor);
     if (!download_directory.empty()) {
       GDir* directory = g_dir_open(download_directory.c_str(), 0, nullptr);
@@ -502,22 +498,7 @@ public:
       pending_opens.push_back(page);
       return;
     }
-    g_message("Brave tab requested: token=%s reuse=%s", page->state_->token.c_str(), parked.empty() ? "no" : "yes");
-    if (!parked.empty() && !page->state_->extension_popup) {
-      // Keep one hidden app window alive when its GTK tab closes. Otherwise
-      // Chromium exits after the last app window and a concurrent --app launch
-      // can become an uncontrolled process with no inherited protocol pipe.
-      auto reusable = std::move(parked.back()); parked.pop_back();
-      page->target = reusable.target; page->session = reusable.session;
-      page->state_->child = reusable.child;
-      if (reusable.surface) {
-        page->adopt_surface(reusable.surface); g_object_unref(reusable.surface);
-      }
-      targets[page->target] = page; sessions[page->session] = page;
-      page->command("Page.resetNavigationHistory");
-      page->attach();
-      return;
-    }
+    g_message("Brave tab requested: token=%s", page->state_->token.c_str());
     page->state_->bootstrap = base + "bootstrap/" + page->state_->token;
     if (composited()) page->adopt_surface(gnosis_compositor_view_new_for_server(compositor, page->state_->token.c_str()));
     const char* executable = g_getenv(!adapter_enabled("scrollbars") ?
@@ -526,6 +507,8 @@ public:
     std::vector<std::string> args{executable ? executable : "brave",
       "--user-data-dir=" + profile, "--app=" + page->state_->bootstrap, "--class=" + window_class,
       composited() ? "--ozone-platform=wayland" : "--ozone-platform=x11", "--no-first-run", "--no-default-browser-check", "--disable-background-mode",
+      // Keep the managed process, never a closed document, alive between tabs.
+      "--keep-alive-for-test",
       // Brave disables the real File System Access pickers unless its base
       // feature is explicitly enabled. Keep the Nix launcher's acceleration
       // switches when supplying the combined feature list.
@@ -1132,11 +1115,6 @@ public:
                 if (page->closed) page->closed();
               }
             }
-            std::erase_if(parked, [&](const auto& page) {
-              if (page.target != text(params, "targetId")) return false;
-              if (page.surface) g_object_unref(page.surface);
-              return true;
-            });
           }
           const std::string source = text(root,"sessionId");
           if (!frame_event(source,method,params)) {
@@ -3791,7 +3769,6 @@ void Page::close() {
   dismiss_http_retry();
   dismiss_passkey_provider();
   stop_find();
-  const bool approved_close = close_is_approved();
   cancel_close();
   if (state_->process) std::erase_if(state_->process->frame_owners, [this](const auto& entry) {
     auto page = entry.second.lock(); return !page || page.get() == this;
@@ -3835,17 +3812,10 @@ void Page::close() {
   if (s.timer) { g_source_remove(s.timer); s.timer = 0; }
   if (s.surface) {
     g_signal_handlers_disconnect_by_data(s.surface, this);
-    // Action popups have a document observer and a short, owner-scoped life.
-    // Never recycle their WebContents into another extension or browser tab.
-    const bool keep = !approved_close && !s.adopted_popup && !s.extension_popup && !s.ephemeral && s.process && !s.process->closing && !s.native_destroyed && !target.empty() && !session.empty() && s.process->parked.empty();
-    if (keep) {
-      g_object_ref(s.surface);
-      s.process->command("Page.stopLoading", "{}", session);
-      s.process->command("Page.navigate", "{\"url\":\"about:blank\"}", session);
-      s.process->parked.push_back({target, session, 0, s.surface});
-    } else if (s.process && !s.process->closing && !s.native_destroyed && !target.empty()) {
+    // Closing a Gnosis tab destroys its WebContents, including audio and workers.
+    // Navigating a hidden reusable tab to about:blank can be blocked by beforeunload.
+    if (s.process && !s.process->closing && !s.native_destroyed && !target.empty())
       s.process->command("Target.closeTarget", "{\"targetId\":" + quote(target) + "}", "");
-    }
     gtk_box_remove(GTK_BOX(s.content), s.surface); s.surface = nullptr;
     if (s.process) { s.process->pages.erase(s.token); s.process->targets.erase(target); s.process->sessions.erase(session); }
   if (s.ephemeral && s.process && !s.process->closing && !s.process->restarting) {
@@ -3862,20 +3832,8 @@ void Page::close() {
   }
     return;
   }
-  const bool park = !s.adopted_popup && s.process && !s.process->closing && !s.native_destroyed && s.display && s.child && !target.empty() && !session.empty();
-  if (park) {
-    XUnmapWindow(s.display, s.child);
-    XReparentWindow(s.display, s.child, DefaultRootWindow(s.display), 0, 0);
-    XDeleteProperty(s.display, s.child, XInternAtom(s.display, "WM_TRANSIENT_FOR", false));
-    s.process->command("Page.stopLoading", "{}", session);
-    s.process->command("Page.navigate", "{\"url\":\"about:blank\"}", session);
-    // One reusable hidden page is sufficient to retain Chromium's app lifetime.
-    // Close further parked pages so closing many tabs releases their renderers.
-    if (s.process->parked.empty()) s.process->parked.push_back({target, session, s.child});
-    else s.process->command("Target.closeTarget", "{\"targetId\":" + quote(target) + "}", "");
-  } else if (s.process && !s.process->closing && !s.native_destroyed && !target.empty()) {
+  if (s.process && !s.process->closing && !s.native_destroyed && !target.empty())
     s.process->command("Target.closeTarget", "{\"targetId\":" + quote(target) + "}", "");
-  }
   if (s.process) { s.process->pages.erase(s.token); s.process->targets.erase(target); s.process->sessions.erase(session); }
   if (s.display) { if (s.container) { XUnmapWindow(s.display, s.container); XDestroyWindow(s.display, s.container); } XFlush(s.display); XCloseDisplay(s.display); s.display = nullptr; }
 }

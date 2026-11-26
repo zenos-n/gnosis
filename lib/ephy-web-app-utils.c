@@ -375,6 +375,15 @@ ephy_web_application_delete_by_desktop_file_id (const char      *desktop_file_id
   return ephy_web_application_delete (id, out_app_found);
 }
 
+/* Retain the installed launcher's stable path across Nix generations. An
+ * isolated build without an installed launcher still uses its own executable. */
+static char *
+web_app_executable (void)
+{
+  char *executable = g_find_program_in_path ("gnosis");
+  return executable ? executable : g_strdup (GNOSIS_EXECUTABLE);
+}
+
 static gboolean
 create_desktop_file (const char  *id,
                      const char  *address,
@@ -389,6 +398,7 @@ create_desktop_file (const char  *id,
   g_autofree char *wm_class = NULL;
   g_autofree char *desktop_entry = NULL;
   XdpPortal *portal = ephy_get_portal ();
+  g_autofree char *executable = web_app_executable ();
 
   g_assert (profile_dir);
 
@@ -400,8 +410,8 @@ create_desktop_file (const char  *id,
   }
 
   file = g_key_file_new ();
-  exec_string_raw = g_strdup_printf ("\"" GNOSIS_EXECUTABLE "\" --application-mode \"--profile=%s\" %s",
-                                     profile_dir,
+  exec_string_raw = g_strdup_printf ("\"%s\" --application-mode \"--profile=%s\" %s",
+                                     executable, profile_dir,
                                      address);
   exec_string = escape_exec_string (exec_string_raw);
   g_key_file_set_value (file, "Desktop Entry", "Exec", exec_string);
@@ -706,10 +716,12 @@ ephy_web_application_launch_for_uri (const char *uri)
     else if (match && match == best) ambiguous = TRUE;
   }
   if (chosen && !ambiguous) {
+    g_autofree char *executable = web_app_executable ();
+
     profile = ephy_web_application_get_profile_directory (chosen->id);
     option = g_strconcat ("--profile=", profile, NULL);
     child = g_subprocess_new (G_SUBPROCESS_FLAGS_NONE, &error,
-                             GNOSIS_EXECUTABLE, "--application-mode", "--open-web-app-link", option, uri, NULL);
+                             executable, "--application-mode", "--open-web-app-link", option, uri, NULL);
     if (!child) g_warning ("Could not open link in web app: %s", error->message);
   }
   ephy_web_application_free_application_list (apps);
@@ -1154,6 +1166,7 @@ ephy_web_application_save (EphyWebApplication *app)
   g_autofree char *icon = NULL;
   g_autofree char *exec = NULL;
   g_autofree char *updated_exec = NULL;
+  g_autofree char *executable = web_app_executable ();
   g_auto (GStrv) strings = NULL;
   g_autofree char *unescaped_url = NULL;
   guint exec_length;
@@ -1214,7 +1227,7 @@ ephy_web_application_save (EphyWebApplication *app)
     else if (*end == '"') quoted = !quoted;
     else if (!quoted && g_ascii_isspace (*end)) break;
   }
-  updated_exec = g_strconcat ("\"" GNOSIS_EXECUTABLE "\"", end, NULL);
+  updated_exec = g_strconcat ("\"", executable, "\"", end, NULL);
   if (g_strcmp0 (exec, updated_exec)) {
     changed = TRUE;
     g_set_str (&exec, updated_exec);

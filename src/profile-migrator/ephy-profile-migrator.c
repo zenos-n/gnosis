@@ -310,6 +310,22 @@ migrate_session_state_backup (void)
     g_warning ("Failed to delete %s: %s", session_backup, g_strerror (errno));
 }
 
+static void
+migrate_web_app_launchers (void)
+{
+  GList *apps;
+
+  if (xdp_portal_running_under_sandbox ())
+    return;
+  apps = ephy_web_application_get_application_list ();
+  for (GList *item = apps; item; item = item->next) {
+    EphyWebApplication *app = item->data;
+    if (!app->declarative)
+      ephy_web_application_save (app);
+  }
+  ephy_web_application_free_application_list (apps);
+}
+
 /* If adding anything here, you need to edit EPHY_PROFILE_MIGRATION_VERSION
  * in ephy-profile-utils.h. */
 const int EPHY_MINIMUM_MIGRATION_VERSION = 37;
@@ -320,6 +336,7 @@ const EphyProfileMigrator migrators[] = {
   /* 39 */ migrate_search_engines,
   /* 40 */ migrate_add_pinned_column,
   /* 41 */ migrate_session_state_backup,
+  /* 42 */ migrate_web_app_launchers,
 };
 
 static gboolean

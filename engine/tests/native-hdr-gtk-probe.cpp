@@ -89,10 +89,14 @@ static gint64 started, changed;
 static void fail(const char *message) {g_printerr("HDR_GTK_FAIL stage=%d %s\n",stage,message);_exit(77);}
 /* Fixture injection is confined to this preload: production always reads the
  * outer compositor. This exercises real nested protocol/Chromium negotiation. */
+static void release_fixture_color(gpointer state) {gdk_color_state_unref(static_cast<GdkColorState *>(state));}
 extern "C" GdkColorState *gnosis_gdk_wayland_surface_get_preferred(GdkSurface *surface, guint32 values[5]) {
   if (fixture >= 0) {
     guint32 sample[] = {0, fixture ? 10000u : 80u, fixture ? 267u : 80u, 0, fixture ? 1000u : 80u};
     memcpy(values,sample,sizeof(sample));
+    g_object_set_data_full(G_OBJECT(surface),"gnosis-preferred-color-state",
+      gdk_color_state_ref(fixture?gdk_color_state_get_rec2100_pq():gdk_color_state_get_srgb()),
+      release_fixture_color);
     return fixture ? gdk_color_state_get_rec2100_pq() : gdk_color_state_get_srgb();
   }
   return reinterpret_cast<GdkColorState *(*)(GdkSurface *,guint32 *)>(dlsym(RTLD_NEXT,"gnosis_gdk_wayland_surface_get_preferred"))(surface,values);
@@ -120,6 +124,12 @@ static GdkTexture *hdr_texture(GskRenderNode *node, bool any=false) {
   for(gsize i=0;i<count;++i)if(auto *child=hdr_texture(children[i],any))return child;
   return nullptr;
 }
+static bool check_root_color(bool hdr) {
+  auto *outer=gtk_native_get_surface(GTK_NATIVE(window));
+  bool correct=bool(g_object_get_data(G_OBJECT(outer),"gnosis-content-hdr"))==hdr;
+  if(!correct)g_print("HDR_GTK_ROOT expected=%s actual=other\n",hdr?"PQ":"sRGB");
+  return correct;
+}
 static bool check_sdr_ramp(bool require_srgb=true) {
   auto *snapshot=gtk_snapshot_new();
   /* Read the current nested surfaces, not a paintable cached across color changes. */
@@ -128,6 +138,7 @@ static bool check_sdr_ramp(bool require_srgb=true) {
   if(!node)return false;
   auto *texture=hdr_texture(node,true);gsk_render_node_unref(node);if(!texture)return false;
   bool srgb=gdk_color_state_equivalent(gdk_texture_get_color_state(texture),gdk_color_state_get_srgb());
+  if(require_srgb && !check_root_color(false)){g_object_unref(texture);return false;}
   if(require_srgb && !srgb){g_print("HDR_SDR_SURFACE expected=sRGB actual=other fixture=%d\n",fixture);g_object_unref(texture);return false;}
   int width=gdk_texture_get_width(texture),height=gdk_texture_get_height(texture);
   std::vector<guchar> pixels(size_t(width)*height*4);
@@ -240,7 +251,8 @@ static gboolean tick(gpointer) {
   } else if(stage==3) {
     if(!check_hdr_pixels()){changed=now;return G_SOURCE_CONTINUE;}
     if(!check_sdr_ramp(false))fail("HDR image changed SDR document grays");
-    g_print("HDR_GTK_WINDOWED_PASS actual HDR texture retains highlights\n");
+    if(!check_root_color(true)){if(now-changed>5*G_USEC_PER_SEC)fail("HDR rounded-edge fallback is still SDR");return G_SOURCE_CONTINUE;}
+    g_print("HDR_GTK_WINDOWED_PASS native center and rounded-edge fallback both use HDR\n");
     evaluate("document.body.innerHTML='<video src=\"/hdr.webm\" width=400 height=400 autoplay muted loop></video>';document.querySelector('video').muted=true;document.querySelector('video').play()",[](JsonObject *){stage=7;changed=g_get_monotonic_time();});
   } else if(stage==7) {
     evaluate("document.querySelector('video').currentTime>0.5 && document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames>3",[](JsonObject *v){
@@ -264,6 +276,7 @@ static gboolean tick(gpointer) {
     evaluate("!matchMedia('(dynamic-range: high)').matches",[](JsonObject *v){if(!json_object_get_boolean_member_with_default(v,"value",false))return;
       evaluate("document.body.innerHTML='<p>SDR again</p>'",[](JsonObject *){stage=5;changed=g_get_monotonic_time();});});
   } else if(stage==5) {
+    if(!check_root_color(false)){if(now-changed>5*G_USEC_PER_SEC)fail("root remained HDR after SDR return");return G_SOURCE_CONTINUE;}
     if(f11_events!=12)fail("missing real F11 key events");
     if (!gnosis_test_outer_feedback || !gnosis_test_target_metadata || (!g_getenv("GNOSIS_HDR_REAL_FEEDBACK") && (!gnosis_test_variable_feedback || !gnosis_test_unknown_feedback))) fail("missing actual/variable/unknown presentation feedback");
     g_print("HDR_GTK_TARGET_PASS gamut and MaxCLL/MaxFALL reach nested surfaces\n");

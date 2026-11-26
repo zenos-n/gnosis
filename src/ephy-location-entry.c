@@ -1475,6 +1475,15 @@ ephy_location_entry_grab_focus (EphyLocationEntry *self)
 {
   gtk_stack_set_visible_child_name (GTK_STACK (self->stack), "edit");
   gtk_widget_grab_focus (self->text);
+
+  /* GtkText's Change Direction action persists across focus and navigation.
+   * A new URL edit starts at the left even after a previous RTL search. */
+  if (g_uri_peek_scheme (gtk_editable_get_text (GTK_EDITABLE (self->text)))) {
+    GtkEditable *delegate = gtk_editable_get_delegate (GTK_EDITABLE (self->text));
+    if (delegate)
+      gtk_widget_set_direction (GTK_WIDGET (delegate), GTK_TEXT_DIR_LTR);
+  }
+
 }
 
 static void

@@ -90,7 +90,7 @@ def main():
                 # utilities would mix their older glibc with the browser's SDK.
                 script = script.replace(invocation,
                     'if [ "${GNOSIS_NATIVE_UI_FD-}" = 5 ]; then\n  LD_PRELOAD=' +
-                    shlex.quote(str(args.native_install_shim.resolve(strict=True))) + ' ' + invocation +
+                    shlex.quote(str(args.native_install_shim.resolve(strict=True))) + ' exec \"$HERE/brave\" \"$@\"' +
                     '\nelse\n  ' + invocation + '\nfi')
             target.write_text(script)
             target.chmod(0o755)

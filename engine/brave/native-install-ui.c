@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include "gnosis-native-install-config.h"
@@ -983,6 +985,11 @@ __attribute__((constructor)) static void initialize(void) {
   fcntl(channel, F_SETFD, FD_CLOEXEC);
   int type = 0; socklen_t size = sizeof type;
   if (getsockopt(channel, SOL_SOCKET, SO_TYPE, &type, &size) || type != SOCK_SEQPACKET) { channel = -1; return; }
+  /* The private launcher execs this ELF directly. Do not orphan a keepalive
+   * browser if its owning GTK process crashes. Children do not inherit this. */
+  pid_t owner = getppid();
+  if (owner == 1 || prctl(PR_SET_PDEATHSIG, SIGTERM) || getppid() != owner)
+    _exit(1);
   g_autoptr(GError) error = NULL;
   g_autoptr(GMappedFile) file = g_mapped_file_new("/proc/self/exe", FALSE, &error);
   g_autofree char *hash = file ? g_compute_checksum_for_data(G_CHECKSUM_SHA256,

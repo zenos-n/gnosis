@@ -21,7 +21,7 @@
    if (!GDK_DISPLAY_DEBUG_CHECK (GDK_DISPLAY (display_wayland), SESSION_MANAGEMENT))
 --- a/gdk/wayland/gdksurface-wayland.c
 +++ b/gdk/wayland/gdksurface-wayland.c
-@@ -892,6 +892,13 @@
+@@ -892,6 +892,14 @@
                       "preferred color state, surface %p color state %s",
                       self, gdk_color_state_get_name (color_state));
  
@@ -30,12 +30,13 @@
 +      g_object_set_data_full (G_OBJECT (self), "gnosis-preferred-color-state",
 +                              gdk_color_state_ref (color_state),
 +                              (GDestroyNotify) gdk_color_state_unref);
-+      color_state = GDK_COLOR_STATE_SRGB;
++      if (!g_object_get_data (G_OBJECT (self), "gnosis-content-hdr"))
++        color_state = GDK_COLOR_STATE_SRGB;
 +    }
    gdk_surface_set_color_state (GDK_SURFACE (self), color_state);
  
    self->color_state_changed = TRUE;
-@@ -1418,3 +1425,19 @@
+@@ -1418,3 +1426,37 @@
  
  /* }}}} */
  /* vim:set foldmethod=marker: */
@@ -46,7 +47,7 @@
 +  return gnosis_gdk_wayland_color_get_target (GDK_WAYLAND_SURFACE (surface)->display_server.color, primaries, light);
 +}
 +
-+/* Keep shell rendering SDR while exposing the preferred display metadata. */
++/* Expose display metadata independently from the content currently shown. */
 +GdkColorState *
 +gnosis_gdk_wayland_surface_get_preferred (GdkSurface *surface, guint32 values[5])
 +{
@@ -55,9 +56,27 @@
 +  return state ? state : GDK_COLOR_STATE_SRGB;
 +}
 +
++/* Rounded-edge fallback textures must use the same HDR output as the native
++ * page subsurface. Ordinary pages retain the SDR shell path. */
++void
++gnosis_gdk_wayland_surface_set_content_hdr (GdkSurface *surface, gboolean enabled)
++{
++  GdkWaylandSurface *self = GDK_WAYLAND_SURFACE (surface);
++  guint32 luminances[5];
++  GdkColorState *preferred = gnosis_gdk_wayland_surface_get_preferred (surface, luminances);
++  GdkColorState *state = enabled && preferred ? preferred : GDK_COLOR_STATE_SRGB;
++
++  g_object_set_data (G_OBJECT (surface), "gnosis-content-hdr", GINT_TO_POINTER (!!enabled));
++  if (gdk_color_state_equal (gdk_surface_get_color_state (surface), state))
++    return;
++  gdk_surface_set_color_state (surface, state);
++  self->color_state_changed = TRUE;
++  gdk_surface_queue_render (surface);
++}
++
 --- a/gdk/wayland/gdkwaylandsurface.h
 +++ b/gdk/wayland/gdkwaylandsurface.h
-@@ -46,5 +46,11 @@
+@@ -46,5 +46,14 @@
  GDK_AVAILABLE_IN_4_18
  void                     gdk_wayland_surface_force_next_commit    (GdkSurface *surface);
  
@@ -66,6 +85,9 @@
 +
 +GDK_AVAILABLE_IN_ALL
 +GdkColorState *gnosis_gdk_wayland_surface_get_preferred (GdkSurface *surface, guint32 values[5]);
++
++GDK_AVAILABLE_IN_ALL
++void gnosis_gdk_wayland_surface_set_content_hdr (GdkSurface *surface, gboolean enabled);
 +
  G_END_DECLS
  
