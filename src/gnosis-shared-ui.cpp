@@ -506,7 +506,9 @@ class Interface::Impl {
     gtk_widget_set_margin_top(host_button_, 12);
     adw_preferences_group_add(host_group, host_button_);
     adw_preferences_page_add(host_page, host_group);
-    adw_view_stack_add_titled(mode_stack, GTK_WIDGET(host_page), "host", _("Share"));
+    adw_view_stack_add_titled_with_icon(mode_stack, GTK_WIDGET(host_page),
+                                        "host", _("Share"),
+                                        "folder-publicshare-symbolic");
 
     auto *join_page = ADW_PREFERENCES_PAGE(adw_preferences_page_new());
     auto *join_group = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
@@ -526,7 +528,9 @@ class Interface::Impl {
     gtk_widget_set_margin_top(join_button_, 12);
     adw_preferences_group_add(join_group, join_button_);
     adw_preferences_page_add(join_page, join_group);
-    adw_view_stack_add_titled(mode_stack, GTK_WIDGET(join_page), "join", _("Join"));
+    adw_view_stack_add_titled_with_icon(mode_stack, GTK_WIDGET(join_page),
+                                        "join", _("Join"),
+                                        "folder-remote-symbolic");
 
     auto *status_group = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     gtk_widget_set_margin_start(GTK_WIDGET(status_group), 12);
