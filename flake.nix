@@ -38,14 +38,16 @@
       compositor-probe = { type = "app"; program = "${compositorProbe}/bin/gnosis-compositor-probe"; };
       check-brave-patches = { type = "app"; program = "${bravePatchChecker}/bin/check-brave-patches"; };
     };
-    checks.${system}.rebrand = package.rebrandCheck;
-    checks.${system}.brave-patches = assert pkgs.lib.assertMsg
-      (pkgs.brave.version == braveSeries.brave_version)
-      "Brave version drift: run check-brave-patches --fetch --brave-version <new-version> --upgrade and review the pin.";
-      pkgs.runCommand "gnosis-brave-patches" { nativeBuildInputs = [ pkgs.python3 pkgs.patch ]; } ''
-        python3 ${./engine/tools/check-brave-patches.py} ${bravePatchInputs} \
-          --patches ${./engine/brave/patches} --report "$out"
-      '';
+    checks.${system} = {
+      rebrand = package.rebrandCheck;
+      brave-patches = assert pkgs.lib.assertMsg
+        (pkgs.brave.version == braveSeries.brave_version)
+        "Brave version drift: run check-brave-patches --fetch --brave-version <new-version> --upgrade and review the pin.";
+        pkgs.runCommand "gnosis-brave-patches" { nativeBuildInputs = [ pkgs.python3 pkgs.patch ]; } ''
+          python3 ${./engine/tools/check-brave-patches.py} ${bravePatchInputs} \
+            --patches ${./engine/brave/patches} --report "$out"
+        '';
+    };
     devShells.${system}.default = pkgs.mkShell {
       inputsFrom = [ package ];
       packages = with pkgs; [ cmake ninja meson pkg-config python3 nodejs xorg-server imagemagick gdb xdotool ];
