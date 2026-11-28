@@ -35,7 +35,8 @@ Checks cover:
   applied approved dimensions.
 - Closing and reopening the session dialog around participant/status updates.
 - Actual Stop Viewing/Stop Sharing banner buttons, reconnecting a viewer, and
-  termination of remote viewing.
+  termination of remote viewing; abrupt relay socket loss stops both peers
+  without native criticals or crashes.
 - GTK frame-clock after-paint feedback for start, join, resize and stop below
   400 ms; a 20 ms main-loop heartbeat stays below 400 ms while work is pending.
 

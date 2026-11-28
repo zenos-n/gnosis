@@ -38,11 +38,15 @@ void observe_transport() {
   auto previous=GnosisShare::current->transport->status;
   GnosisShare::current->transport->status=[previous](const std::string& text){if(text=="Connected peer-to-peer")direct=true;if(previous)previous(text);};
 }
-struct Feedback {std::string label;bool absent;gint64 started;gulong signal=0;};
+struct Feedback {std::string label;bool absent;gint64 started;GtkWidget* paint;double command_ms;gulong signal=0;};
 void feedback(const std::string& label,bool absent,gint64 started) {
-  auto* clock=gtk_widget_get_frame_clock(GTK_WIDGET(primary));
+  GtkWidget* paint=GTK_WIDGET(primary);
+  if(!absent&&label!="resize")
+    for(auto* w=gtk_application_get_windows(GTK_APPLICATION(g_application_get_default()));w;w=w->next)
+      if(auto* target=button(GTK_WIDGET(w->data),label)){paint=GTK_WIDGET(gtk_widget_get_root(target));break;}
+  auto* clock=gtk_widget_get_frame_clock(paint);
   if(!clock){reply("{\"error\":\"No GTK frame clock\"}");return;}
-  auto* watch=new Feedback{label,absent,started};
+  auto* watch=new Feedback{label,absent,started,GTK_WIDGET(g_object_ref(paint)),(g_get_monotonic_time()-started)/1000.};
   watch->signal=g_signal_connect_data(clock,"after-paint",G_CALLBACK(+[](GdkFrameClock* clock,gpointer data){
     auto* watch=static_cast<Feedback*>(data);bool visible=false;
     for(auto* w=gtk_application_get_windows(GTK_APPLICATION(g_application_get_default()));w;w=w->next) {
@@ -56,11 +60,11 @@ void feedback(const std::string& label,bool absent,gint64 started) {
     auto elapsed=g_get_monotonic_time()-watch->started;
     if(visible!=watch->absent||elapsed>2000000) {
       auto signal=watch->signal;
-      reply("{\"feedbackMs\":"+std::to_string(elapsed/1000.)+",\"visible\":"+(visible!=watch->absent?"true":"false")+"}");
+      reply("{\"commandMs\":"+std::to_string(watch->command_ms)+",\"feedbackMs\":"+std::to_string(elapsed/1000.)+",\"visible\":"+(visible!=watch->absent?"true":"false")+"}");
       g_signal_handler_disconnect(clock,signal);
-    }else{gtk_widget_queue_draw(GTK_WIDGET(primary));gdk_frame_clock_request_phase(clock,GDK_FRAME_CLOCK_PHASE_AFTER_PAINT);}
-  }),watch,+[](gpointer data,GClosure*){delete static_cast<Feedback*>(data);},GConnectFlags(0));
-  gtk_widget_queue_draw(GTK_WIDGET(primary));gdk_frame_clock_request_phase(clock,GDK_FRAME_CLOCK_PHASE_AFTER_PAINT);
+    }else{gtk_widget_queue_draw(watch->paint);gdk_frame_clock_request_phase(clock,GDK_FRAME_CLOCK_PHASE_AFTER_PAINT);}
+  }),watch,+[](gpointer data,GClosure*){auto* watch=static_cast<Feedback*>(data);g_object_unref(watch->paint);delete watch;},GConnectFlags(0));
+  gtk_widget_queue_draw(paint);gdk_frame_clock_request_phase(clock,GDK_FRAME_CLOCK_PHASE_AFTER_PAINT);
 }
 gboolean tick(gpointer) {
   using namespace GnosisShare;

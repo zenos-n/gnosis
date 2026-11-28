@@ -119,7 +119,18 @@ async def main():
     site = web.TCPSite(site_runner, '127.0.0.1', 0)
     await site.start()
     origin = f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}'
-    relay_runner = web.AppRunner(runpy.run_path(str(args.server))['create_app'](), access_log=None)
+    relay_connections = set()
+    @web.middleware
+    async def track_relay(request, handler):
+        transport = request.transport
+        relay_connections.add(transport)
+        try:
+            return await handler(request)
+        finally:
+            relay_connections.discard(transport)
+    relay_app = runpy.run_path(str(args.server))['create_app']()
+    relay_app.middlewares.append(track_relay)
+    relay_runner = web.AppRunner(relay_app, access_log=None)
     await relay_runner.setup()
     relay = web.TCPSite(relay_runner, '127.0.0.1', 0)
     await relay.start()
@@ -276,6 +287,23 @@ async def main():
             await until(guest_stopped, 'host ends remote viewing', timeout=2)
             print(f'SHARED_NATIVE_PASS Stop Sharing visible feedback {elapsed:.1f}ms; remote viewing ended', flush=True)
             assert asset_requests == ['fixture=host'], asset_requests
+            await host.rpc('host', server=relay_url)
+            state = await until(host_ready, 'fresh host for socket failure')
+            await guest.rpc('join', invite=state['invite'])
+            members = await until(pending, 'guest before socket failure')
+            await host.rpc('approve', peer=members[0]['id'])
+            await until(viewer_ready, 'viewer before socket failure')
+            await until(replay_ready, 'replay before socket failure')
+            for connection in list(relay_connections):
+                connection.abort()
+            async def both_stopped():
+                states = await asyncio.gather(host.rpc('state'), guest.rpc('state'))
+                return all(state is None or state['stopped'] for state in states)
+            await until(both_stopped, 'abrupt relay disconnect cleanup', timeout=3)
+            for role in ('host', 'guest'):
+                output = (args.log_dir / f'{role}.log').read_text()
+                assert 'CRITICAL' not in output and 'Bail out!' not in output, f'{role} emitted a critical; see logs'
+            print('SHARED_NATIVE_PASS abrupt socket loss stops host/guest without criticals or crashes', flush=True)
             print('SHARED_NATIVE_ALL_PASS', flush=True)
         finally:
             for process in processes:
