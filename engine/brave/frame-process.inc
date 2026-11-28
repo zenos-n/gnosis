@@ -60,13 +60,14 @@
     for (auto& id : sources) forget_frame(id);
   }
   void attach_frames(const std::string& source) {
-    if (!adapter_enabled("frame-sessions")) return;
     // Native menus/metadata can be installed with runImmediately below. Pausing
     // every cross-origin frame puts normal site startup behind adapter replies
     // (or the five-second fallback), which breaks time-sensitive embeds.
     bool shared_guest = false;
     if (auto main=sessions.find(source);main!=sessions.end()) { if(auto page=main->second.lock())shared_guest=page->sharing_guest; }
     else if (auto frame=frame_sessions.find(source);frame!=frame_sessions.end()) { if(auto page=frame->second.owner.lock())shared_guest=page->sharing_guest; }
+    // Guest resource isolation is required even when optional page adapters are disabled.
+    if (!shared_guest && !adapter_enabled("frame-sessions")) return;
     command("Target.setAutoAttach",std::string(R"({"autoAttach":true,"waitForDebuggerOnStart":)")+(shared_guest?"true":"false")+R"(,"flatten":true,"filter":[{"type":"iframe","exclude":false},{"exclude":true}]})",source,
       [](JsonObject*,const std::string& error){if(!error.empty())g_warning("Native iframe adapters could not attach: %s",error.c_str());});
   }
