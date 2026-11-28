@@ -484,7 +484,9 @@ void Transport::close() {
   if (s->timer) { g_source_remove(s->timer);s->timer=0; }
   if (s->ws) {
     g_signal_handlers_disconnect_by_data(s->ws,this);
-    soup_websocket_connection_close(s->ws,SOUP_WEBSOCKET_CLOSE_NORMAL,nullptr);g_clear_object(&s->ws);
+    if(soup_websocket_connection_get_state(s->ws)==SOUP_WEBSOCKET_STATE_OPEN)
+      soup_websocket_connection_close(s->ws,SOUP_WEBSOCKET_CLOSE_NORMAL,nullptr);
+    g_clear_object(&s->ws);
   }
   if (s->soup) { soup_session_abort(s->soup);g_clear_object(&s->soup); }
   for (auto& [_,peer] : s->peers) if (peer->worker) peer->worker->stop();

@@ -340,14 +340,20 @@ public:
       } // A site-controlled oversized resource URL is not fatal.
     };
     add(f);
-    auto *rs = json_object_get_array_member(tree, "resources");
+    auto *resources_node = json_object_get_member(tree, "resources");
+    auto *rs = resources_node && JSON_NODE_HOLDS_ARRAY(resources_node)
+                   ? json_node_get_array(resources_node)
+                   : nullptr;
     if (rs)
       for (guint i = 0; i < json_array_get_length(rs); ++i) {
         auto *n = json_array_get_element(rs, i);
         if (JSON_NODE_HOLDS_OBJECT(n))
           add(json_node_get_object(n));
       }
-    auto *children = json_object_get_array_member(tree, "childFrames");
+    auto *children_node = json_object_get_member(tree, "childFrames");
+    auto *children = children_node && JSON_NODE_HOLDS_ARRAY(children_node)
+                         ? json_node_get_array(children_node)
+                         : nullptr;
     if (children)
       for (guint i = 0; i < json_array_get_length(children); ++i) {
         auto *n = json_array_get_element(children, i);
