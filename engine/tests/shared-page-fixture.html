@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Shared page fixture</title>
+<body>
+<script>
+'use strict';
+const role = new URL(location.href).searchParams.get('role');
+const load = src => new Promise((resolve, reject) => {
+  const script = document.createElement('script');
+  script.src = src; script.onload = resolve; script.onerror = reject;
+  document.head.append(script);
+});
+const waitFor = async predicate => {
+  const until = Date.now() + 7000;
+  while (!predicate()) {
+    if (Date.now() > until) throw new Error('Fixture timed out');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+};
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+(async () => {
+  if (role === 'host') {
+    document.body.innerHTML = '<h1 id="signed">Private host account</h1>' +
+      '<input id="password" type="password" value="never-send-this-password">' +
+      '<div id="change">Before</div><canvas id="opaque" width="100" height="30"></canvas>';
+    document.getElementById('opaque').getContext('2d').fillRect(0, 0, 100, 30);
+    await load('/rrweb.js');
+    const recorder = await (await fetch('/record.js')).text();
+    globalThis.recording = Function(`return ${recorder}`)()(event => parent.hostEvent(event));
+  } else if (role === 'guest') {
+    document.body.innerHTML = '<div id="stage"></div><div id="cursors"></div>';
+    const events = new EventTarget();
+    globalThis.Gnosis = Object.freeze({
+      postMessage: (name, payload) => parent.guestMessage(name, payload),
+      addEventListener: (...args) => events.addEventListener(...args),
+      removeEventListener: (...args) => events.removeEventListener(...args),
+    });
+    globalThis.deliver = payload => events.dispatchEvent(new CustomEvent('shared', {detail: payload}));
+    await load('/rrweb.js');
+    await load('/geometry.js');
+    await load('/view.js');
+  } else {
+    document.body.innerHTML = '<pre id="result">Running</pre><iframe id="host"></iframe><iframe id="guest"></iframe>';
+    const host = document.getElementById('host');
+    const guest = document.getElementById('guest');
+    host.style.width = '1000px'; host.style.height = '600px';
+    guest.style.width = '700px'; guest.style.height = '700px';
+    const pending = [];
+    const guestMessages = [];
+    let ready = false;
+    globalThis.hostEvent = event => ready ? guest.contentWindow.deliver(event) : pending.push(event);
+    globalThis.guestMessage = (_name, message) => {
+      guestMessages.push(message);
+      if (message.kind === 'ready') {
+        ready = true;
+        for (const event of pending.splice(0)) guest.contentWindow.deliver(event);
+      }
+    };
+    host.src = '?role=host'; guest.src = '?role=guest';
+    const replay = () => guest.contentDocument.querySelector('#stage iframe');
+    await waitFor(() => replay()?.contentDocument?.getElementById('signed'));
+    check(replay().contentDocument.getElementById('signed').textContent === 'Private host account', 'Host signed-in DOM missing');
+    check(!replay().contentDocument.getElementById('password').value.includes('never-send'), 'Password was not masked');
+    check(replay().getAttribute('sandbox') === 'allow-same-origin', 'Replay enabled scripts');
+    const probe = replay().contentDocument.createElement('button');
+    probe.setAttribute('onclick', 'globalThis.replayScriptRan=true');
+    replay().contentDocument.body.append(probe); probe.click();
+    check(!replay().contentWindow.replayScriptRan, 'Replayed event handler executed');
+    host.contentDocument.getElementById('change').textContent = 'After';
+    await waitFor(() => replay().contentDocument.getElementById('change')?.textContent === 'After');
+    const stage = guest.contentDocument.getElementById('stage');
+    check(stage.style.width === '1000px', 'Host CSS viewport was not preserved');
+    guest.contentWindow.deliver({kind: 'zoom', factor: 2});
+    const transform = stage.style.transform;
+    host.contentWindow.recording.snapshot();
+    await waitFor(() => replay()?.contentDocument?.getElementById('change')?.textContent === 'After');
+    check(stage.style.transform === transform, 'Full snapshot reset local zoom');
+    check(host.contentWindow.innerWidth === 1000, 'Guest changed host page layout');
+    guest.contentWindow.deliver({kind: 'ended'});
+    check(!replay(), 'Ended viewer retained replay frame');
+    host.contentWindow.recording.stop();
+    document.getElementById('result').textContent = 'PASS: local signed-in DOM, password mask, script-disabled sandbox, mutation replay, fixed host layout, zoom-preserving snapshot and cleanup';
+  }
+})().catch(error => {
+  const result = document.getElementById('result');
+  if (result) result.textContent = 'FAIL: ' + error.stack;
+  else parent.hostEvent({kind: 'fixture-error', error: String(error)});
+});
+</script>
