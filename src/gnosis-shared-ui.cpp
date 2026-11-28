@@ -94,6 +94,7 @@ class Interface::Impl {
     session_active_ = true;
     host_ = host;
     invitation_ = invitation;
+    status_text_.clear();
     adw_view_stack_set_visible_child_name(dialog_stack_, "session");
 
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(session_row_),
@@ -116,8 +117,10 @@ class Interface::Impl {
   void status(const std::string &text)
   {
     if (session_active_) {
+      status_text_ = text;
       adw_action_row_set_subtitle(ADW_ACTION_ROW(session_row_),
                                   text.empty() ? nullptr : text.c_str());
+      update_session_banners();
       return;
     }
     const bool visible = !text.empty();
@@ -293,6 +296,7 @@ class Interface::Impl {
     session_active_ = false;
     host_ = false;
     invitation_.clear();
+    status_text_.clear();
     local_zoom_ = 1.0;
 
     detach_host_banner();
@@ -603,7 +607,9 @@ class Interface::Impl {
     if (!host)
       return;
 
-    host_banner_ = adw_banner_new(_("You’re sharing this page"));
+    host_banner_ = adw_banner_new(status_text_.empty()
+                                      ? _("You’re sharing this page")
+                                      : status_text_.c_str());
     g_object_add_weak_pointer(G_OBJECT(host_banner_),
                               reinterpret_cast<gpointer *>(&host_banner_));
     adw_banner_set_button_label(ADW_BANNER(host_banner_), _("Stop Sharing"));
@@ -626,9 +632,20 @@ class Interface::Impl {
     if (!guest_banner_)
       return;
     adw_banner_set_title(ADW_BANNER(guest_banner_),
-                         session_active_ ? _("You’re viewing a shared page")
-                                         : _("Connecting to shared session…"));
+                         !status_text_.empty()
+                             ? status_text_.c_str()
+                             : session_active_ ? _("You’re viewing a shared page")
+                                               : _("Connecting to shared session…"));
     adw_banner_set_revealed(ADW_BANNER(guest_banner_), TRUE);
+  }
+
+  void update_session_banners()
+  {
+    if (host_banner_)
+      adw_banner_set_title(ADW_BANNER(host_banner_),
+                           status_text_.empty() ? _("You’re sharing this page")
+                                                : status_text_.c_str());
+    update_guest_banner();
   }
 
   Interface *owner_;
@@ -658,6 +675,7 @@ class Interface::Impl {
   GtkWidget *host_banner_ = nullptr;
 
   std::string invitation_;
+  std::string status_text_;
   double local_zoom_ = 1.0;
   bool session_active_ = false;
   bool host_ = false;
