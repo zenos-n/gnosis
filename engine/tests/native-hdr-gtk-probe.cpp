@@ -168,7 +168,10 @@ static bool check_p3_pixels() {
   gdk_cicp_params_set_range(params,GDK_CICP_RANGE_FULL);
   auto *p3=gdk_cicp_params_build_color_state(params,nullptr);g_object_unref(params);
   if(!p3)fail("GTK cannot construct the Display P3 reference state");
-  if(!gdk_color_state_equivalent(gdk_texture_get_color_state(texture),p3)) {
+  auto *outer = gtk_native_get_surface(GTK_NATIVE(window));
+  auto *root_color = static_cast<GdkColorState *>(g_object_get_data(G_OBJECT(outer),"gnosis-content-color-state"));
+  if(!root_color || !gdk_color_state_equivalent(root_color,p3) ||
+     !gdk_color_state_equivalent(gdk_texture_get_color_state(texture),p3)) {
     gdk_color_state_unref(p3);g_object_unref(texture);return false;
   }
   int width=gdk_texture_get_width(texture),height=gdk_texture_get_height(texture);

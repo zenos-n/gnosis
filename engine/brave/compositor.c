@@ -433,12 +433,17 @@ static GdkTexture *surface_texture(GnosisCompositorView *self, struct wlr_surfac
   if (!self->logged_shm) { self->logged_shm = TRUE; g_message("Wayland client supplied a shared-memory buffer"); }
   return texture;
 }
-typedef struct { GnosisCompositorView *host; GtkSnapshot *snapshot; gboolean hdr; } Snapshot;
+typedef struct { GnosisCompositorView *host; GtkSnapshot *snapshot; gboolean hdr; GdkColorState *color; } Snapshot;
 static void snapshot_surface(struct wlr_surface *surface, int x, int y, void *data) {
   Snapshot *s = data;
   if (surface->current.transform != WL_OUTPUT_TRANSFORM_NORMAL) return;
   GdkTexture *texture = surface_texture(s->host, surface); if (!texture) return;
-  if (gdk_color_state_equivalent(gdk_texture_get_color_state(texture), gdk_color_state_get_rec2100_pq())) s->hdr = TRUE;
+  GdkColorState *color = gdk_texture_get_color_state(texture);
+  gboolean hdr = gdk_color_state_equivalent(color, gdk_color_state_get_rec2100_pq());
+  if (hdr || (!s->hdr && !gdk_color_state_equivalent(color, gdk_color_state_get_srgb()))) {
+    g_clear_pointer(&s->color, gdk_color_state_unref);
+    s->color = gdk_color_state_ref(color); s->hdr = hdr;
+  }
   struct wlr_fbox source; wlr_surface_get_buffer_source_box(surface, &source);
   if (source.width <= 0 || source.height <= 0) { g_object_unref(texture); return; }
   double sx = surface->current.width / source.width, sy = surface->current.height / source.height;
@@ -497,10 +502,10 @@ static void snapshot_live(GtkWidget *widget, GtkSnapshot *snapshot) {
   GtkNative *native = gtk_widget_get_native(widget);
   GdkSurface *outer = native ? gtk_native_get_surface(native) : NULL;
   if (!self->active || !self->active->toplevel->base->surface->mapped) {
-    if (outer && GDK_IS_WAYLAND_SURFACE(outer)) gnosis_gdk_wayland_surface_set_content_hdr(outer, FALSE);
+    if (outer && GDK_IS_WAYLAND_SURFACE(outer)) gnosis_gdk_wayland_surface_set_content_color(outer, gdk_color_state_get_srgb());
     return;
   }
-  Snapshot state = {self, snapshot, FALSE};
+  Snapshot state = {self, snapshot, FALSE, NULL};
   struct wlr_box geometry = self->active->toplevel->base->geometry;
   gtk_snapshot_save(snapshot);
   if (geometry.width > 0 && geometry.height > 0)
@@ -508,7 +513,8 @@ static void snapshot_live(GtkWidget *widget, GtkSnapshot *snapshot) {
                        (float)gtk_widget_get_height(widget) / geometry.height);
   wlr_xdg_surface_for_each_surface(self->active->toplevel->base, snapshot_surface, &state);
   gtk_snapshot_restore(snapshot);
-  if (outer && GDK_IS_WAYLAND_SURFACE(outer)) gnosis_gdk_wayland_surface_set_content_hdr(outer, state.hdr);
+  if (outer && GDK_IS_WAYLAND_SURFACE(outer)) gnosis_gdk_wayland_surface_set_content_color(outer, state.color ? state.color : gdk_color_state_get_srgb());
+  g_clear_pointer(&state.color, gdk_color_state_unref);
 }
 #include "history-swipe.inc"
 static void snapshot(GtkWidget *widget, GtkSnapshot *snapshot) {

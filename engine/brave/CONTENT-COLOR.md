@@ -14,9 +14,11 @@ implemented.
 Rounded window clipping can prevent a page's edge strips from being offloaded
 to native Wayland subsurfaces. Those strips are rendered by GTK instead. The
 outer GTK surface follows the visible textures: HDR content enables its preferred
-HDR state; ordinary SDR content resets it to sRGB. Keeping the outer surface
-permanently SDR clips/tone maps just those strips, producing a darker bottom
-band. Monitor capability alone must never enable the outer HDR path.
+HDR state; wide-gamut SDR retains its actual color state; sRGB content resets it
+to sRGB. Keeping the outer surface
+permanently sRGB clips/tone maps just those strips, producing a different bottom
+band. SDR does not imply sRGB: P3 edge strips must also retain their gamut so
+compositor-specific SDR adjustments treat the center and edges alike. Monitor capability alone must never enable the outer HDR path.
 
 Installed web-app launchers use the stable installed Gnosis launcher found in
 PATH, falling back to the build executable only when none is installed. Profile
