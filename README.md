@@ -287,3 +287,29 @@ The original project's documentation is preserved in
 [README.epiphany.md](README.epiphany.md). Epiphany's original license and
 copyright notices remain in place. The package includes CEF's license and
 Chromium third-party credits.
+
+## Shared browsing sessions
+
+Choose **Shared Sessions…** in the main menu to share the current regular tab,
+or paste an invitation to join. The host approves each guest and can grant or
+remove control individually. A persistent native banner stops sharing or viewing.
+Private tabs, local files and browser settings pages cannot be shared.
+
+Guests replay the host's signed-in page locally at the host's CSS viewport size.
+Different aspect ratios get black bars. Ctrl+wheel or Ctrl+plus/minus changes
+local viewing zoom; Alt+drag pans a zoomed view. The toolbar can request a new
+page size, which the host approves or denies. Neither local zoom nor panning
+changes the host's layout or scroll position.
+
+WebRTC carries peer-to-peer traffic where possible; an encrypted WebSocket relay
+handles restricted networks. The invitation contains the session encryption key;
+share it only with intended participants. The server implementation lives in
+[gnosis-server](https://github.com/doromiert/gnosis-server). Hosts can select a
+custom secure session server when starting a session.
+
+Guest page scripts are disabled. Images, styles and fonts are served from the
+host's already-loaded resource cache; account cookies and browser profiles are
+not copied. Canvas, cross-origin frames and video use clipped image updates at
+up to four frames per second. Protected media and unusually large resources may
+be unavailable. This is intended for shared browsing, forms and documents rather
+than video streaming.
