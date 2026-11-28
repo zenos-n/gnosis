@@ -66,8 +66,10 @@ class Interface::Impl {
     if (guest_window_)
       gtk_window_destroy(GTK_WINDOW(guest_window_));
     g_clear_object(&guest_session_);
-    if (dialog_)
+    if (dialog_) {
       adw_dialog_force_close(ADW_DIALOG(dialog_));
+      g_clear_object(&dialog_);
+    }
 
     g_weak_ref_clear(&host_window_);
   }
@@ -444,8 +446,10 @@ class Interface::Impl {
 
   void build_dialog()
   {
-    dialog_ = GTK_WIDGET(adw_dialog_new());
-    g_object_add_weak_pointer(G_OBJECT(dialog_), reinterpret_cast<gpointer *>(&dialog_));
+    /* Closing an AdwDialog only dismisses it. Keep one owner reference so
+     * asynchronous session updates can safely update its rows while hidden,
+     * and the same populated dialog can be presented again. */
+    dialog_ = GTK_WIDGET(g_object_ref_sink(adw_dialog_new()));
     adw_dialog_set_title(ADW_DIALOG(dialog_), _("Shared Sessions"));
     adw_dialog_set_content_width(ADW_DIALOG(dialog_), 520);
     adw_dialog_set_content_height(ADW_DIALOG(dialog_), 600);
