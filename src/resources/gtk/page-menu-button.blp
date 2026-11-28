@@ -42,6 +42,12 @@ menu page_menu {
 
   section {
     item {
+      label: _("_Shared Sessions…");
+      action: "app.shared-sessions";
+      hidden-when: "action-missing";
+    }
+
+    item {
       label: _("Histo_ry");
       action: "app.history";
     }

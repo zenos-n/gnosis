@@ -25,6 +25,7 @@
 
 #include "ephy-shell.h"
 #include "gnosis-mcp.h"
+#include "gnosis-shared.h"
 
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
@@ -698,6 +699,7 @@ ephy_shell_startup (GApplication *application)
   set_accel_for_action (shell, "app.preferences", "<Primary>comma");
   set_accel_for_action (shell, "app.quit", "<Primary>q");
   gnosis_mcp_start (application);
+  gnosis_shared_start (application);
 }
 
 static void
@@ -905,6 +907,7 @@ static void
 ephy_shell_shutdown (GApplication *app)
 {
   EphyShell *shell = EPHY_SHELL (app);
+  gnosis_shared_stop ();
   gnosis_mcp_stop ();
 
   /* Refusing to shut down when requested is perhaps controversial, but it's
@@ -1638,6 +1641,12 @@ ephy_shell_open_uris_idle (OpenURIsData *data)
   gboolean reusing_empty_tab = FALSE;
   const char *url;
 
+  url = data->uris ? data->uris[data->current_uri] : NULL;
+  if (gnosis_shared_open_uri (url)) {
+    data->current_uri++;
+    return data->uris && !!data->uris[data->current_uri];
+  }
+
   mode = ephy_embed_shell_get_mode (EPHY_EMBED_SHELL (data->shell));
 
   if (!data->window)
@@ -1657,8 +1666,6 @@ ephy_shell_open_uris_idle (OpenURIsData *data)
         reusing_empty_tab = TRUE;
     }
   }
-
-  url = data->uris ? data->uris[data->current_uri] : NULL;
 
   if (!reusing_empty_tab) {
     embed = ephy_shell_new_tab_full (data->shell,
