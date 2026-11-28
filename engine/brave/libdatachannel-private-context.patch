@@ -1,0 +1,21 @@
+libdatachannel 0.24.1: keep libnice off the application's GTK main context.
+Upstream source is MPL-2.0 (Paul-Louis Ageneau and contributors).
+
+--- a/src/impl/icetransport.cpp
++++ b/src/impl/icetransport.cpp
+@@ -365 +365,6 @@
+-    : mMainLoop(g_main_loop_new(nullptr, FALSE), g_main_loop_unref) {
++    : mMainLoop([] {
++          auto *context = g_main_context_new();
++          auto *loop = g_main_loop_new(context, FALSE);
++          g_main_context_unref(context);
++          return loop;
++      }(), g_main_loop_unref) {
+@@ -369 +374,6 @@
+-	mThread = std::thread(g_main_loop_run, mMainLoop.get());
++	mThread = std::thread([loop = mMainLoop.get()] {
++		auto *context = g_main_loop_get_context(loop);
++		g_main_context_push_thread_default(context);
++		g_main_loop_run(loop);
++		g_main_context_pop_thread_default(context);
++	});

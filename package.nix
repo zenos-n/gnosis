@@ -57,6 +57,9 @@ let
       platforms = [ system ];
     };
   };
+  gnosisDataChannel = pkgs.libdatachannel.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [ ./engine/brave/libdatachannel-private-context.patch ];
+  });
   rrweb = pkgs.stdenvNoCC.mkDerivation {
     pname = "gnosis-rrweb";
     version = "2.2.2";
@@ -127,7 +130,7 @@ let
       if input == pkgs.gtk4.dev then gnosisGtk.dev
       else if input == pkgs.gtk4 then gnosisGtk
       else input
-    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy gnosisWlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode pkgs.libsodium pkgs.libdatachannel ] ++ chromiumLibraries;
+    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy gnosisWlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode pkgs.libsodium gnosisDataChannel ] ++ chromiumLibraries;
     preConfigure = (old.preConfigure or "") + ''
       export PKG_CONFIG_PATH="${gnosisGtk.dev}/lib/pkgconfig:''${PKG_CONFIG_PATH-}"
       test "$(pkg-config --variable=libdir gtk4)" = "${lib.getLib gnosisGtk}/lib"
@@ -145,7 +148,7 @@ let
       gappsWrapperArgs+=(--set GNOSIS_NOTIFICATION_ICON "$out/share/icons/hicolor/scalable/apps/com.neg-zero.Gnosis.svg")
       ${lib.optionalString (brave ? nativeInstallShim) "gappsWrapperArgs+=(--set-default GNOSIS_NATIVE_UI_BRIDGE 1)"}
     '';
-    passthru = (old.passthru or {}) // { inherit cefSdk ublock gnosisGtk keepassxcBrowser rebrandCheck; };
+    passthru = (old.passthru or {}) // { inherit cefSdk ublock gnosisGtk gnosisDataChannel rrweb keepassxcBrowser rebrandCheck; };
     meta = old.meta // {
       description = "GNOME Web shell with a composited Brave web-content backend";
       homepage = "https://github.com/doromiert/gnosis";
