@@ -40,3 +40,5 @@ option('cef_wrapper', type: 'string', value: '', description: 'Optional prebuilt
 option('ublock_dir', type: 'string', value: '', description: 'Official unpacked full uBlock Origin')
 
 option('keepassxc_dir', type: 'string', value: '', description: 'Pinned bundled official KeePassXC-Browser integration')
+
+option('rrweb_dir', type: 'string', value: '', description: 'Pinned rrweb2.2.2 assets for opt-in shared sessions')

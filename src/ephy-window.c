@@ -186,6 +186,7 @@ struct _EphyWindow {
   GtkWidget *toast_overlay;
   GtkWidget *content_overlay;
   GtkWidget *ai_cursor;
+  GHashTable *shared_cursors;
   GtkWidget *zoom_osd;
   GtkWidget *zoom_osd_label;
   guint zoom_osd_timeout;
@@ -3506,6 +3507,7 @@ static void
 setup_tab_switcher (EphyWindow *window)
 {
   GtkWidget *overlay = gtk_overlay_new ();
+  GtkWidget *session_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
   GtkEventController *keys = gtk_event_controller_key_new ();
   GtkGesture *outside = gtk_gesture_click_new ();
   GtkWidget *zoom_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
@@ -3530,7 +3532,10 @@ setup_tab_switcher (EphyWindow *window)
   gtk_widget_set_margin_bottom (window->zoom_osd, 56);
   gtk_widget_set_can_target (window->zoom_osd, FALSE);
   gtk_overlay_add_overlay (GTK_OVERLAY (overlay), window->zoom_osd);
-  adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (window->toast_overlay), overlay);
+  gtk_widget_set_vexpand (overlay, TRUE);
+  gtk_box_append (GTK_BOX (session_box), overlay);
+  g_object_set_data (G_OBJECT (window), "gnosis-session-box", session_box);
+  adw_toast_overlay_set_child (ADW_TOAST_OVERLAY (window->toast_overlay), session_box);
   g_signal_connect_object (window->tab_switcher_model, "closed", G_CALLBACK (tab_switcher_closed_cb), window, 0);
   gtk_event_controller_set_propagation_phase (keys, GTK_PHASE_CAPTURE);
   g_signal_connect_object (keys, "key-pressed", G_CALLBACK (tab_switcher_key_pressed_cb), window, 0);
@@ -3552,7 +3557,8 @@ draw_ai_cursor (GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoint
   cairo_line_to (cr, 10, 16);
   cairo_line_to (cr, 18, 15);
   cairo_close_path (cr);
-  cairo_set_source_rgb (cr, .48, .25, .85);
+  if (data) gdk_cairo_set_source_rgba (cr, data);
+  else cairo_set_source_rgb (cr, .48, .25, .85);
   cairo_fill_preserve (cr);
   cairo_set_source_rgb (cr, 1, 1, 1);
   cairo_set_line_width (cr, 1.5);
@@ -3600,6 +3606,71 @@ ephy_window_set_ai_cursor (EphyWindow *window, EphyWebView *view,
   gtk_widget_set_visible (window->ai_cursor, TRUE);
 }
 
+void
+ephy_window_set_shared_banner (EphyWindow *window, GtkWidget *banner)
+{
+  GtkWidget *box = g_object_get_data (G_OBJECT (window), "gnosis-session-box");
+  GtkWidget *old = g_object_get_data (G_OBJECT (window), "gnosis-session-banner");
+  if (!box || old == banner) return;
+  if (old) gtk_box_remove (GTK_BOX (box), old);
+  if (banner) gtk_box_prepend (GTK_BOX (box), banner);
+  g_object_set_data (G_OBJECT (window), "gnosis-session-banner", banner);
+}
+
+void
+ephy_window_set_shared_cursor (EphyWindow *window, EphyWebView *view,
+                               const char *id, const char *name, guint color,
+                               double x, double y, double viewport_width, double viewport_height)
+{
+  static const char *colors[] = {"#3584e4", "#9141ac", "#c64600", "#26a269", "#c01c28", "#613583"};
+  GtkWidget *cursor;
+  graphene_point_t point, position;
+  if (!window->shared_cursors)
+    window->shared_cursors = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
+  cursor = g_hash_table_lookup (window->shared_cursors, id);
+  if (!view) {
+    if (cursor) {
+      gtk_overlay_remove_overlay (GTK_OVERLAY (window->content_overlay), cursor);
+      g_hash_table_remove (window->shared_cursors, id);
+    }
+    return;
+  }
+  if (!window->active_embed || ephy_embed_get_web_view (window->active_embed) != view ||
+      viewport_width <= 0 || viewport_height <= 0 || x < 0 || y < 0) {
+    if (cursor) gtk_widget_set_visible (cursor, FALSE);
+    return;
+  }
+  point = GRAPHENE_POINT_INIT (x * gtk_widget_get_width (GTK_WIDGET (view)) / viewport_width,
+                              y * gtk_widget_get_height (GTK_WIDGET (view)) / viewport_height);
+  if (!gtk_widget_compute_point (GTK_WIDGET (view), window->content_overlay, &point, &position)) return;
+  if (!cursor) {
+    GtkWidget *arrow = gtk_drawing_area_new ();
+    GtkWidget *label = gtk_label_new (name);
+    GdkRGBA rgba;
+    gdk_rgba_parse (&rgba, colors[color % G_N_ELEMENTS (colors)]);
+    cursor = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
+    g_object_ref_sink (cursor);
+    gtk_widget_set_name (cursor, "gnosis-shared-cursor");
+    gtk_drawing_area_set_content_width (GTK_DRAWING_AREA (arrow), 20);
+    gtk_drawing_area_set_content_height (GTK_DRAWING_AREA (arrow), 26);
+    gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (arrow), draw_ai_cursor,
+                                    gdk_rgba_copy (&rgba), (GDestroyNotify)gdk_rgba_free);
+    gtk_widget_add_css_class (label, "pill");
+    gtk_widget_add_css_class (label, "caption");
+    gtk_widget_add_css_class (label, "accent");
+    gtk_box_append (GTK_BOX (cursor), arrow);
+    gtk_box_append (GTK_BOX (cursor), label);
+    gtk_widget_set_halign (cursor, GTK_ALIGN_START);
+    gtk_widget_set_valign (cursor, GTK_ALIGN_START);
+    gtk_widget_set_can_target (cursor, FALSE);
+    gtk_overlay_add_overlay (GTK_OVERLAY (window->content_overlay), cursor);
+    g_hash_table_insert (window->shared_cursors, g_strdup (id), cursor);
+  }
+  gtk_widget_set_margin_start (cursor, MAX (0, (int)position.x - 2));
+  gtk_widget_set_margin_top (cursor, MAX (0, (int)position.y - 2));
+  gtk_widget_set_visible (cursor, TRUE);
+}
+
 static void clear_download_feedback (EphyWindow *window);
 
 static void
@@ -3615,6 +3686,7 @@ ephy_window_dispose (GObject *object)
   if (!window->closing) {
     gnosis_mcp_window_closed (GTK_WINDOW (window));
     g_clear_weak_pointer (&window->ai_cursor);
+    g_clear_pointer (&window->shared_cursors, g_hash_table_unref);
     window->closing = TRUE;
 
     if (window->active_embed) {

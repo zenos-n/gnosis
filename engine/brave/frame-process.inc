@@ -64,7 +64,10 @@
     // Native menus/metadata can be installed with runImmediately below. Pausing
     // every cross-origin frame puts normal site startup behind adapter replies
     // (or the five-second fallback), which breaks time-sensitive embeds.
-    command("Target.setAutoAttach",R"({"autoAttach":true,"waitForDebuggerOnStart":false,"flatten":true,"filter":[{"type":"iframe","exclude":false},{"exclude":true}]})",source,
+    bool shared_guest = false;
+    if (auto main=sessions.find(source);main!=sessions.end()) { if(auto page=main->second.lock())shared_guest=page->sharing_guest; }
+    else if (auto frame=frame_sessions.find(source);frame!=frame_sessions.end()) { if(auto page=frame->second.owner.lock())shared_guest=page->sharing_guest; }
+    command("Target.setAutoAttach",std::string(R"({"autoAttach":true,"waitForDebuggerOnStart":)")+(shared_guest?"true":"false")+R"(,"flatten":true,"filter":[{"type":"iframe","exclude":false},{"exclude":true}]})",source,
       [](JsonObject*,const std::string& error){if(!error.empty())g_warning("Native iframe adapters could not attach: %s",error.c_str());});
   }
   bool frame_event(const std::string& source,const std::string& method,JsonObject* params) {
@@ -107,6 +110,11 @@
         }
         return G_SOURCE_REMOVE;
       },new Resume{weak_from_this(),child},+[](gpointer data){delete static_cast<Resume*>(data);});
+      if (page->sharing_guest) {
+        command("Fetch.enable",R"({"patterns":[{"urlPattern":"http://*"},{"urlPattern":"https://*"}]})",child);
+        command("Network.setCacheDisabled",R"({"cacheDisabled":true})",child);
+        command("Network.setBypassServiceWorker",R"({"bypass":true})",child);
+      }
       attach_frames(child);
       command("Emulation.setEmulatedMedia", web_color_scheme(), child);
       command("Page.enable","{}",child); command("Network.enable","{}",child);
@@ -146,6 +154,11 @@
     auto page = found->second.owner.lock();
     if (!page || page->is_closed()) { resume_frame(source); forget_frame(source); return true; }
     auto& frame = found->second;
+    if (method == "Fetch.requestPaused" && page->sharing_guest) {
+      const std::string id=text(params,"frameId");
+      if(!id.empty()){frame.frames.insert(id);frame_owners[id]=page;frame_sources[id]=source;}
+      page->handle(method,params,true); return true;
+    }
     if (method == "Page.frameNavigated" || method == "Page.frameAttached") {
       if (page->state_->close_approved || page->state_->close_callback) page->cancel_close();
       auto* details = object(params,"frame");

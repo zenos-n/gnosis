@@ -2007,7 +2007,7 @@ void Page::internal_request(JsonObject* params) {
   });
 }
 bool Page::send_page_message(const std::string& expected, const std::string& name, const std::string& json) {
-  if (!is_internal_page(expected) || state_->context_unique.empty() || name.size() > 128 || json.size() > 1048576) return false;
+  if (!is_internal_page(expected) || state_->context_unique.empty() || name.size() > 128 || json.size() > (name == "shared" && expected == "ephy-about:shared-session" ? 4*1048576 : 1048576)) return false;
   command("Runtime.evaluate", "{\"uniqueContextId\":" + quote(state_->context_unique) + ",\"expression\":" +
     quote("globalThis.__gnosisDispatch?.(" + quote(name) + "," + rewrite_resources(json, state_->internal_origin) + ")") + "}");
   return true;
@@ -2074,6 +2074,8 @@ void Page::reload(bool bypass) { command("Page.reload", bypass ? "{\"ignoreCache
 void Page::stop() { command("Page.stopLoading"); }
 void Page::handle(const std::string& method, JsonObject* params, bool frame_event) {
   if (state_->disposed || !params) return;
+  if (sharing_event) sharing_event(method, params);
+  if (is_closed()) return;
   // A popup can redirect before attachment, replacing the context/title we tagged.
   if (method == "Page.domContentEventFired" && !frame_event) claim_popup_surface();
   if (method == "Page.frameAttached") {
@@ -2107,7 +2109,7 @@ void Page::handle(const std::string& method, JsonObject* params, bool frame_even
   } else if (method == "Page.javascriptDialogClosed") {
     dismiss_script_dialog(false);
   } else if (method == "Fetch.requestPaused") {
-    internal_request(params);
+    if (!sharing_fetch || !sharing_fetch(params)) internal_request(params);
   } else if (method == "Runtime.executionContextsCleared") {
     dismiss_emoji_picker();
     if (state_->install_external) dismiss_install_dialog(true);
@@ -3807,7 +3809,7 @@ void Page::close() {
   if (s.process && s.native_tab >= 0) s.process->zoom_tabs.erase(s.native_tab);
   dismiss_context_menu();
   if (s.keys) { gtk_widget_remove_controller(s.content, s.keys); s.keys = nullptr; }
-  changed = {}; closed = {}; failed = {}; navigation_started = {}; open_uri = {}; create_popup = {}; popup_ready = {}; load_finished = {}; tls_changed = {}; fullscreen_changed = {}; zoom_changed = {}; favicon_changed = {}; event = {};
+  changed = {}; closed = {}; failed = {}; navigation_started = {}; open_uri = {}; create_popup = {}; popup_ready = {}; load_finished = {}; tls_changed = {}; fullscreen_changed = {}; zoom_changed = {}; favicon_changed = {}; event = {}; sharing_event = {}; sharing_fetch = {};
   popup_size_changed = {};
   if (s.timer) { g_source_remove(s.timer); s.timer = 0; }
   if (s.surface) {

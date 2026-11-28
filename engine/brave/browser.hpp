@@ -56,6 +56,10 @@ public:
   std::function<void(const std::string&, bool, ResourceReply)> internal_resource;
   std::function<void(const std::string&, const std::string&, const std::string&)> page_message;
   DownloadBegin download_begin;
+  // Opt-in session callbacks; websites never receive native transport credentials.
+  std::function<void(const std::string&, JsonObject*)> sharing_event;
+  std::function<bool(JsonObject*)> sharing_fetch;
+  bool sharing_guest = false;
   std::string canonical_uri(const std::string&) const;
   bool is_internal_page(const std::string&) const;
   bool send_page_message(const std::string&, const std::string&, const std::string&);

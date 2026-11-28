@@ -9,7 +9,7 @@ let
     cat ${pkgs.librsvg}/${pkgs.gdk-pixbuf.binaryDir}/loaders.cache \
       ${pkgs.webp-pixbuf-loader}/${pkgs.gdk-pixbuf.binaryDir}/webp-loaders.cache > "$out"
   '';
-  uiLibraries = with pkgs; [ gtk4 libadwaita json-glib libepoxy fontconfig freetype libsodium libsecret libsoup_3 qrencode ];
+  uiLibraries = with pkgs; [ gtk4 libadwaita json-glib libepoxy fontconfig freetype libsodium libsecret libsoup_3 qrencode libdatachannel ];
   chromiumLibraries = with pkgs; [
     stdenv.cc.cc.lib glib nss nspr dbus at-spi2-core systemd
     cups libdrm libxkbcommon libGL libgbm expat alsa-lib pango cairo
@@ -56,6 +56,16 @@ let
       license = lib.licenses.bsd3;
       platforms = [ system ];
     };
+  };
+  rrweb = pkgs.stdenvNoCC.mkDerivation {
+    pname = "gnosis-rrweb";
+    version = "2.2.2";
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/rrweb/-/rrweb-2.2.2.tgz";
+      hash = "sha512-LUvR1mbcTTaNkn5OiR0r2neuH86quaQsmucT07N4Yd7YFdxPtr9qMQ2e//1FkbWKa1L3JGmPIQtgv83VPJe3mQ==";
+    };
+    dontBuild = true;
+    installPhase = "mkdir -p $out; cp dist/rrweb.umd.min.cjs dist/style.min.css $out/; mkdir -p $out/share/licenses/rrweb; cp ${./third-party/rrweb/LICENSE} $out/share/licenses/rrweb/LICENSE";
   };
   ublock = pkgs.stdenvNoCC.mkDerivation rec {
     pname = "ublock-origin";
@@ -117,13 +127,13 @@ let
       if input == pkgs.gtk4.dev then gnosisGtk.dev
       else if input == pkgs.gtk4 then gnosisGtk
       else input
-    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy gnosisWlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode ] ++ chromiumLibraries;
+    ) old.buildInputs ++ [ pkgs.libpwquality pkgs.libepoxy gnosisWlroots pkgs.wayland pkgs.wayland-protocols pkgs.libxkbcommon pkgs.libdrm pkgs.libglvnd pkgs.pixman pkgs.qrencode pkgs.libsodium pkgs.libdatachannel ] ++ chromiumLibraries;
     preConfigure = (old.preConfigure or "") + ''
       export PKG_CONFIG_PATH="${gnosisGtk.dev}/lib/pkgconfig:''${PKG_CONFIG_PATH-}"
       test "$(pkg-config --variable=libdir gtk4)" = "${lib.getLib gnosisGtk}/lib"
       export NIX_LDFLAGS="-rpath ${lib.getLib gnosisGtk}/lib ''${NIX_LDFLAGS-}"
     '';
-    mesonFlags = [ "-Dgranite=disabled" "-Dunit_tests=disabled" "-Dman-pages=disabled" "-Dcef_root=${cefSdk}" "-Dcef_runtime=linked" "-Dublock_dir=${ublock}" "-Dkeepassxc_dir=${keepassxcBrowser}" ];
+    mesonFlags = [ "-Dgranite=disabled" "-Dunit_tests=disabled" "-Dman-pages=disabled" "-Dcef_root=${cefSdk}" "-Dcef_runtime=linked" "-Dublock_dir=${ublock}" "-Dkeepassxc_dir=${keepassxcBrowser}" "-Drrweb_dir=${rrweb}" ];
     preFixup = (old.preFixup or "") + ''
       gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [ pkgs.dconf ]})
       gappsWrapperArgs+=(--set GDK_PIXBUF_MODULE_FILE ${pixbufLoaders})

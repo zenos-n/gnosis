@@ -1,0 +1,4 @@
+rrweb 2.2.2, MIT licensed.
+https://github.com/rrweb-io/rrweb/tree/rrweb@2.2.2
+CSS is from the pinned rrweb npm tarball, whose integrity is checked in package.nix.
+The JS bundle is installed by the rrweb derivation instead of vendored.

@@ -126,4 +126,9 @@ void ephy_window_cancel_close (EphyWindow *window);
 void ephy_window_set_ai_cursor (EphyWindow *window, EphyWebView *view,
                                double x, double y, double viewport_width, double viewport_height);
 
+void ephy_window_set_shared_banner (EphyWindow *window, GtkWidget *banner);
+void ephy_window_set_shared_cursor (EphyWindow *window, EphyWebView *view,
+                                    const char *id, const char *name, guint color,
+                                    double x, double y, double viewport_width, double viewport_height);
+
 G_END_DECLS

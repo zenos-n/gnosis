@@ -21,8 +21,15 @@ if get_option('unit_tests').enabled()
     args: [files('../engine/tests/mcp_protocol_test.py'), mcp_server])
 endif
 
+shared_resources = gnome.compile_resources('gnosis-shared-resources', 'gnosis-shared.gresource.xml',
+  source_dir: meson.current_source_dir(), c_name: 'gnosis_shared')
+
 libephymain_sources = [
+  shared_resources,
+  'gnosis-shared-ui.cpp',
   'gnosis-mcp.cpp',
+  'gnosis-share-transport.cpp',
+  'gnosis-shared.cpp',
   mcp_resources,
   'bookmarks/ephy-bookmark.c',
   'bookmarks/ephy-bookmark-properties.c',
@@ -139,6 +146,8 @@ blueprints = custom_target('blueprints',
 )
 
 libephymain_deps = [
+  dependency('LibDataChannel', method: 'cmake'),
+  dependency('libsodium'),
   config_h,
   ephyembed_dep,
   ephymisc_dep,
@@ -167,6 +176,7 @@ libephymain_includes = include_directories(
 
 libephymain = shared_library('ephymain',
   libephymain_sources,
+  cpp_args: ['-DGNOSIS_RRWEB_FILE="' + get_option('rrweb_dir') / 'rrweb.umd.min.cjs' + '"'],
   dependencies: libephymain_deps,
   include_directories: libephymain_includes,
   install: true,

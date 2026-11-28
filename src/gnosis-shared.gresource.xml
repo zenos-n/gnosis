@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources><gresource prefix="/com/neg_zero/Gnosis/shared">
+  <file alias="record.js">gnosis-share-record.js</file>
+  <file alias="view.js">gnosis-share-view.js</file>
+  <file alias="geometry.js">gnosis-share-geometry.js</file>
+<file alias="rrweb.css">../third-party/rrweb/style.min.css</file>
+</gresource></gresources>
