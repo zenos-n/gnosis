@@ -505,6 +505,8 @@ tabs_query (EphySuggestionModel *self,
   windows = gtk_application_get_windows (GTK_APPLICATION (application));
 
   for (guint win_idx = 0; win_idx < g_list_length (windows); win_idx++) {
+    if (!EPHY_IS_WINDOW (g_list_nth_data (windows, win_idx)))
+      continue;
     window = EPHY_WINDOW (g_list_nth_data (windows, win_idx));
 
     tab_view = ephy_window_get_tab_view (window);

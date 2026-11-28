@@ -158,6 +158,9 @@ ephy_shell_startup_continue (EphyShell               *shell,
   GtkWindow *active_window = gtk_application_get_active_window (GTK_APPLICATION (shell));
   EphyEmbedShellMode mode;
 
+  if (!EPHY_IS_WINDOW (active_window))
+    active_window = NULL;
+
   mode = ephy_embed_shell_get_mode (EPHY_EMBED_SHELL (shell));
 
   /* Desktop launchers can still point at an older installed binary. Apply
@@ -252,6 +255,9 @@ import_bookmarks (GSimpleAction *action,
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
 
+  if (!EPHY_IS_WINDOW (window))
+    return;
+
   window_cmd_import_bookmarks (NULL, NULL, EPHY_WINDOW (window));
 }
 
@@ -263,6 +269,9 @@ export_bookmarks (GSimpleAction *action,
   GtkWindow *window;
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
+
+  if (!EPHY_IS_WINDOW (window))
+    return;
 
   window_cmd_export_bookmarks (NULL, NULL, EPHY_WINDOW (window));
 }
@@ -276,6 +285,9 @@ import_passwords (GSimpleAction *action,
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
 
+  if (!EPHY_IS_WINDOW (window))
+    return;
+
   window_cmd_import_passwords (NULL, NULL, EPHY_WINDOW (window));
 }
 
@@ -288,6 +300,9 @@ export_passwords (GSimpleAction *action,
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
 
+  if (!EPHY_IS_WINDOW (window))
+    return;
+
   window_cmd_export_passwords (NULL, NULL, EPHY_WINDOW (window));
 }
 
@@ -299,6 +314,9 @@ show_history (GSimpleAction *action,
   GtkWindow *window;
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
+
+  if (!EPHY_IS_WINDOW (window))
+    return;
 
   window_cmd_show_history (NULL, NULL, EPHY_WINDOW (window));
 }
@@ -324,6 +342,9 @@ show_clear_data_view (GSimpleAction *action,
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
 
+  if (!EPHY_IS_WINDOW (window))
+    return;
+
   window_cmd_show_clear_data_view (NULL, NULL, EPHY_WINDOW (window));
 }
 
@@ -335,6 +356,9 @@ show_preferences (GSimpleAction *action,
   GtkWindow *window;
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
+
+  if (!EPHY_IS_WINDOW (window))
+    return;
 
   window_cmd_show_preferences (NULL, NULL, EPHY_WINDOW (window));
 }
@@ -405,6 +429,9 @@ close_all_tabs (GSimpleAction *action,
   GtkWindow *window;
 
   window = gtk_application_get_active_window (GTK_APPLICATION (ephy_shell));
+
+  if (!EPHY_IS_WINDOW (window))
+    return;
 
   window_cmd_close_all_tabs (NULL, NULL, window);
 }
@@ -718,7 +745,12 @@ static void
 portal_check (EphyShell *shell)
 {
   if (g_network_monitor_get_connectivity (ephy_shell_get_net_monitor (shell)) == G_NETWORK_CONNECTIVITY_PORTAL) {
-    EphyWindow *window = EPHY_WINDOW (gtk_application_get_active_window (GTK_APPLICATION (shell)));
+    GtkWindow *active = gtk_application_get_active_window (GTK_APPLICATION (shell));
+    EphyWindow *window;
+
+    if (!EPHY_IS_WINDOW (active))
+      return;
+    window = EPHY_WINDOW (active);
 
     ephy_link_open (EPHY_LINK (window), "http://nmcheck.gnome.org/", NULL, EPHY_LINK_NEW_TAB | EPHY_LINK_JUMP_TO);
   }
@@ -1114,8 +1146,10 @@ ephy_shell_new_tab_full (EphyShell       *shell,
   if (flags & EPHY_NEW_TAB_JUMP)
     jump_to = TRUE;
 
-  if (!window)
-    window = EPHY_WINDOW (gtk_application_get_active_window (GTK_APPLICATION (shell)));
+  if (!window) {
+    GtkWindow *active = gtk_application_get_active_window (GTK_APPLICATION (shell));
+    window = EPHY_IS_WINDOW (active) ? EPHY_WINDOW (active) : ephy_window_new ();
+  }
 
   LOG ("Opening new tab window %p parent-embed %p jump-to:%s",
        window, previous_embed, jump_to ? "t" : "f");
@@ -1461,11 +1495,14 @@ finish_closing_after_modified_forms_check (EphyShell *shell)
   /* Validate every approval before destroying any window. A page can navigate
    * while another window is asking its beforeunload question. */
   for (GList *l = windows; l; l = l->next) {
+    if (!EPHY_IS_WINDOW (l->data))
+      continue;
     if (!ephy_window_can_commit_close (EPHY_WINDOW (l->data))) {
       shell->checking_modified_forms = FALSE;
       shell->num_windows_with_modified_forms = 0;
       for (GList *reset = windows; reset; reset = reset->next)
-        ephy_window_cancel_close (EPHY_WINDOW (reset->data));
+        if (EPHY_IS_WINDOW (reset->data))
+          ephy_window_cancel_close (EPHY_WINDOW (reset->data));
       return;
     }
   }
@@ -1474,7 +1511,13 @@ finish_closing_after_modified_forms_check (EphyShell *shell)
 
   shell->checking_modified_forms = FALSE;
   while (windows) {
-    EphyWindow *window = EPHY_WINDOW (windows->data);
+    EphyWindow *window;
+
+    if (!EPHY_IS_WINDOW (windows->data)) {
+      windows = windows->next;
+      continue;
+    }
+    window = EPHY_WINDOW (windows->data);
 
     windows = windows->next;
     ephy_window_handle_quit_with_modified_forms (window);
@@ -1506,11 +1549,15 @@ guint
 ephy_shell_get_n_windows (EphyShell *shell)
 {
   GList *list;
+  guint count = 0;
 
   g_assert (EPHY_IS_SHELL (shell));
 
   list = gtk_application_get_windows (GTK_APPLICATION (shell));
-  return g_list_length (list);
+  for (GList *l = list; l; l = l->next)
+    if (EPHY_IS_WINDOW (l->data))
+      count++;
+  return count;
 }
 
 gboolean
@@ -1526,7 +1573,13 @@ ephy_shell_close_all_windows (EphyShell *shell)
   shell->checking_modified_forms = TRUE;
   shell->num_windows_with_modified_forms = ephy_shell_get_n_windows (shell);
   while (windows) {
-    EphyWindow *window = EPHY_WINDOW (windows->data);
+    EphyWindow *window;
+
+    if (!EPHY_IS_WINDOW (windows->data)) {
+      windows = windows->next;
+      continue;
+    }
+    window = EPHY_WINDOW (windows->data);
 
     windows = windows->next;
 
@@ -1556,7 +1609,13 @@ ephy_shell_close_all_windows (EphyShell *shell)
 
     windows = gtk_application_get_windows (GTK_APPLICATION (shell));
     while (windows) {
-      EphyWindow *window = EPHY_WINDOW (windows->data);
+      EphyWindow *window;
+
+      if (!EPHY_IS_WINDOW (windows->data)) {
+        windows = windows->next;
+        continue;
+      }
+      window = EPHY_WINDOW (windows->data);
 
       windows = windows->next;
       ephy_window_close (window);
@@ -1607,7 +1666,8 @@ open_uris_data_new (EphyShell        *shell,
   if ((startup_mode == EPHY_STARTUP_NEW_WINDOW || startup_mode == EPHY_STARTUP_BROWSER_WINDOW) && !fullscreen_lockdown) {
     data->window = ephy_window_new ();
   } else {
-    data->window = EPHY_WINDOW (gtk_application_get_active_window (GTK_APPLICATION (shell)));
+    GtkWindow *active = gtk_application_get_active_window (GTK_APPLICATION (shell));
+    data->window = EPHY_IS_WINDOW (active) ? EPHY_WINDOW (active) : NULL;
     data->reuse_empty_tab = TRUE;
 
     if (data->window && !fullscreen_lockdown &&
@@ -1761,6 +1821,8 @@ ephy_shell_get_web_view (EphyShell *shell,
   windows = gtk_application_get_windows (GTK_APPLICATION (shell));
 
   for (GList *list = windows; list && list->data; list = list->next) {
+    if (!EPHY_IS_WINDOW (list->data))
+      continue;
     window = GTK_WINDOW (list->data);
     tab_view = ephy_window_get_tab_view (EPHY_WINDOW (window));
 
@@ -1784,7 +1846,7 @@ ephy_shell_get_active_web_view (EphyShell *shell)
   GtkWidget *page;
 
   window = gtk_application_get_active_window (GTK_APPLICATION (shell));
-  if (!window)
+  if (!EPHY_IS_WINDOW (window))
     return NULL;
 
   tab_view = ephy_window_get_tab_view (EPHY_WINDOW (window));
@@ -1812,9 +1874,15 @@ ephy_shell_resync_title_boxes (EphyShell  *shell,
 
   windows = gtk_application_get_windows (GTK_APPLICATION (shell));
   while (windows) {
-    EphyWindow *window = EPHY_WINDOW (windows->data);
+    EphyWindow *window;
     EphyHeaderBar *header_bar;
     EphyTitleBox *title_box;
+
+    if (!EPHY_IS_WINDOW (windows->data)) {
+      windows = windows->next;
+      continue;
+    }
+    window = EPHY_WINDOW (windows->data);
 
     header_bar = EPHY_HEADER_BAR (ephy_window_get_header_bar (window));
     title_box = EPHY_TITLE_BOX (ephy_header_bar_get_title_widget (header_bar));

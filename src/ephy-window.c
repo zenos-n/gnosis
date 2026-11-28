@@ -5114,7 +5114,8 @@ stop_window_close_after_modified_forms_check (WindowHasModifiedFormsData *data)
     ephy_shell_set_checking_modified_forms (shell, FALSE);
     ephy_shell_set_num_windows_with_modified_forms (shell, 0);
     for (GList *l = windows; l; l = l->next)
-      ephy_window_cancel_close (EPHY_WINDOW (l->data));
+      if (EPHY_IS_WINDOW (l->data))
+        ephy_window_cancel_close (EPHY_WINDOW (l->data));
   }
   window_has_modified_forms_data_free (data);
 }

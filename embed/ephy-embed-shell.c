@@ -114,7 +114,11 @@ ephy_embed_shell_get_view_for_page_id (EphyEmbedShell *self,
   GList *windows = gtk_application_get_windows (GTK_APPLICATION (self));
 
   for (GList *l = windows; l && l->data; l = l->next) {
-    g_autoptr (GList) tabs = ephy_embed_container_get_children (l->data);
+    g_autoptr (GList) tabs = NULL;
+
+    if (!EPHY_IS_EMBED_CONTAINER (l->data))
+      continue;
+    tabs = ephy_embed_container_get_children (l->data);
 
     for (GList *t = tabs; t && t->data; t = t->next) {
       EphyWebView *ephy_view = ephy_embed_get_web_view (t->data);
@@ -155,6 +159,9 @@ tabs_catalog_get_tabs_info (EphyTabsCatalog *catalog)
   database = ephy_embed_shell_get_favicon_database (embed_shell);
 
   for (GList *l = windows; l && l->data; l = l->next) {
+    if (!EPHY_IS_EMBED_CONTAINER (l->data))
+      continue;
+    g_clear_pointer (&tabs, g_list_free);
     tabs = ephy_embed_container_get_children (l->data);
 
     for (GList *t = tabs; t && t->data; t = t->next) {

@@ -107,6 +107,8 @@ handle_ephy_tab_uri (EphyLocationController *controller,
       return FALSE;
 
     window = g_list_nth_data (windows, window_id);
+    if (!EPHY_IS_WINDOW (window))
+      return FALSE;
     tab_view = ephy_window_get_tab_view (window);
 
     gtk_window_present (GTK_WINDOW (window));
